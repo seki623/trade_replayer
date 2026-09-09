@@ -68,11 +68,19 @@ body{background:#0a0a0f;color:#d1d4dc;font-family:'Segoe UI',system-ui,sans-seri
   <!-- リプレイ & デモトレード コントロール -->
   <!-- リプレイ & デモトレード コントロール -->
   <div class="replay-ctrl-group">
-    <span style="font-size:10px;color:#aaa">開始:</span>
-    <input type="datetime-local" id="startTime" class="replay-select" value="2025-07-01T09:00">
-    <span style="font-size:10px;color:#aaa">終了:</span>
-    <input type="datetime-local" id="endTime" class="replay-select" value="2025-07-01T17:00">
-    
+  <!-- 銘柄選択を追加 -->
+  <select id="symbolSelect" class="replay-select">
+    <option value="XAUUSD">XAUUSD (ゴールド)</option>
+    <option value="XAGUSD">XAGUSD (シルバー)</option>
+    <option value="JP225">JP225 (日経225)</option>
+  </select>
+
+  <span style="font-size:10px;color:#aaa">開始:</span>
+  <input type="datetime-local" id="startTime" class="replay-select" value="2025-07-01T09:00">
+  <span style="font-size:10px;color:#aaa">終了:</span>
+  <input type="datetime-local" id="endTime" class="replay-select" value="2025-07-01T17:00">
+
+      
     <button class="btn-replay" onclick="loadSelectedRange()">Load</button>
     <button class="btn-replay" onclick="startReplay()">▶</button>
     <button class="btn-replay" onclick="pauseReplay()">❚❚</button>
