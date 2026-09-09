@@ -66,28 +66,14 @@ body{background:#0a0a0f;color:#d1d4dc;font-family:'Segoe UI',system-ui,sans-seri
   <div class="tf-group" id="tf-group"></div>
 
   <!-- リプレイ & デモトレード コントロール -->
+  <!-- リプレイ & デモトレード コントロール -->
   <div class="replay-ctrl-group">
-    <select id="yearSelect" class="replay-select">
-      <option value="2023">2023年</option>
-      <option value="2024">2024年</option>
-      <option value="2025" selected>2025年</option>
-      <option value="2026">2026年</option>
-    </select>
-    <select id="monthSelect" class="replay-select">
-      <option value="01">01月</option>
-      <option value="02">02月</option>
-      <option value="03">03月</option>
-      <option value="04">04月</option>
-      <option value="05">05月</option>
-      <option value="06">06月</option>
-      <option value="07" selected>07月</option>
-      <option value="08">08月</option>
-      <option value="09">09月</option>
-      <option value="10">10月</option>
-      <option value="11">11月</option>
-      <option value="12">12月</option>
-    </select>
-    <button class="btn-replay" onclick="loadSelectedCSV()">Load</button>
+    <span style="font-size:10px;color:#aaa">開始:</span>
+    <input type="datetime-local" id="startTime" class="replay-select" value="2025-07-01T09:00">
+    <span style="font-size:10px;color:#aaa">終了:</span>
+    <input type="datetime-local" id="endTime" class="replay-select" value="2025-07-01T17:00">
+    
+    <button class="btn-replay" onclick="loadSelectedRange()">Load</button>
     <button class="btn-replay" onclick="startReplay()">▶</button>
     <button class="btn-replay" onclick="pauseReplay()">❚❚</button>
     <select id="speedSelect" class="replay-select" onchange="changeReplaySpeed(this.value)">

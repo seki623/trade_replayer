@@ -1,8 +1,9 @@
 // ==========================================
-// TickForge 連携版: リプレイ & ペパートレード
+// TickForge 連携版: 期間指定ステップ描画リプレイ
 // ==========================================
 
-let tickData = [];
+let allRawData = [];       // CSVから解析した全データ
+let replayQueue = [];      // 開始〜終了期間中に1足ずつ追加していくデータ
 let currentIndex = 0;
 let replayTimer = null;
 let replaySpeed = 500; // ms
@@ -12,119 +13,152 @@ let paperAccount = {
     position: null
 };
 
-// 1. CSV読み込み処理 (XAUUSD/YYYY-MM.csv に対応)
-function loadSelectedCSV() {
-    const yearEl = document.getElementById('yearSelect');
-    const monthEl = document.getElementById('monthSelect');
-    if (!yearEl || !monthEl) return;
-    
-    const year = yearEl.value;
-    const month = monthEl.value;
-    const filePath = `./XAUUSD/${year}-${month}.csv`;
+// 1. 指定された範囲のCSVをロード＆フィルタリング
+async function loadSelectedRange() {
+    const startVal = document.getElementById('startTime').value;
+    const endVal = document.getElementById('endTime').value;
+
+    if (!startVal || !endVal) {
+        alert("開始日時と終了日時を正しく指定してください。");
+        return;
+    }
+
+    const startTs = Math.floor(new Date(startVal).getTime() / 1000);
+    const endTs = Math.floor(new Date(endVal).getTime() / 1000);
+
+    if (startTs >= endTs) {
+        alert("終了日時は開始日時より後の時間を設定してください。");
+        return;
+    }
+
+    // 開始日時の年月から該当するCSVファイルパスを特定 (例: XAUUSD/2025-07.csv)
+    const startDate = new Date(startVal);
+    const yyyy = startDate.getFullYear();
+    const mm = String(startDate.getMonth() + 1).padStart(2, '0');
+    const filePath = `./XAUUSD/${yyyy}-${mm}.csv`;
 
     pauseReplay();
-    
-    fetch(filePath)
-        .then(response => {
-            if (!response.ok) throw new Error("CSVファイルが見つかりません: " + filePath);
-            return response.text();
-        })
-        .then(text => {
-            parseCSV(text);
-            alert(`【ロード完了】${year}年${month}月 (全${tickData.length}本)`);
-        })
-        .catch(err => {
-            console.error("CSV読み込みエラー:", err);
-            alert(`指定されたファイルが存在しませんでした:\n${filePath}`);
-        });
+
+    try {
+        const response = await fetch(filePath);
+        if (!response.ok) throw new Error("ファイルが見つかりません: " + filePath);
+        const text = await response.text();
+        
+        parseCSV(text);
+
+        // 開始時間より前のデータ（背景となる過去チャート）
+        const historyData = allRawData.filter(d => d.time < startTs);
+        // 再生期間中のデータ（▶ ボタンで1足ずつ描画するデータ）
+        replayQueue = allRawData.filter(d => d.time >= startTs && d.time <= endTs);
+
+        if (replayQueue.length === 0) {
+            alert("指定された期間のデータが見つかりませんでした。");
+            return;
+        }
+
+        // 過去データのみを初期描画（未来の足は見せない）
+        if (typeof candleSeries !== 'undefined' && candleSeries) {
+            candleSeries.setData(historyData.map(d => ({
+                time: d.time, open: d.open, high: d.high, low: d.low, close: d.close
+            })));
+            if (typeof chart !== 'undefined' && chart) {
+                chart.timeScale().fitContent();
+            }
+        }
+
+        currentIndex = 0;
+        alert(`【準備完了】\n過去データ: ${historyData.length}本描画済み\nリプレイ対象: ${replayQueue.length}本\n▶ ボタンを押すとローソク足の生成が始まります。`);
+
+    } catch (err) {
+        console.error("ロードエラー:", err);
+        alert(`データの読み込みに失敗しました:\n${filePath}`);
+    }
 }
 
+// 日付文字列のパース関数
+function parseDateTimeToUnix(dateStr, timeStr) {
+    try {
+        let fullStr = dateStr;
+        if (timeStr) fullStr += ' ' + timeStr;
+        fullStr = fullStr.replace(/[\.\/]/g, '-');
+        const d = new Date(fullStr);
+        if (!isNaN(d.getTime())) return Math.floor(d.getTime() / 1000);
+    } catch(e) {}
+    return null;
+}
+
+// CSV解析関数
 function parseCSV(text) {
     const lines = text.trim().split('\n');
-    tickData = [];
+    allRawData = [];
 
     for (let i = 0; i < lines.length; i++) {
         const line = lines[i].trim();
         if (!line) continue;
+        const cols = line.split(/[,;\t]+/);
+        if (cols.length < 5) continue;
 
-        const cols = line.split(',');
-        if (cols.length >= 6) {
-            // YYYY.MM.DD HH:MM のパース
-            const dateParts = cols[0].split('.');
-            const timeParts = cols[1].split(':');
-            
-            if (dateParts.length === 3 && timeParts.length >= 2) {
-                const year = parseInt(dateParts[0]);
-                const month = parseInt(dateParts[1]) - 1;
-                const day = parseInt(dateParts[2]);
-                const hour = parseInt(timeParts[0]);
-                const min = parseInt(timeParts[1]);
+        let unixSec = null;
+        let oIdx = 1, hIdx = 2, lIdx = 3, cIdx = 4, vIdx = 5;
 
-                // Unixタイムスタンプ（秒）
-                const unixSec = Math.floor(Date.UTC(year, month, day, hour, min) / 1000);
+        if (cols[0].length <= 10 && cols[1] && cols[1].includes(':')) {
+            unixSec = parseDateTimeToUnix(cols[0], cols[1]);
+            oIdx = 2; hIdx = 3; lIdx = 4; cIdx = 5; vIdx = 6;
+        } else {
+            unixSec = parseDateTimeToUnix(cols[0]);
+            oIdx = 1; hIdx = 2; lIdx = 3; cIdx = 4; vIdx = 5;
+        }
 
-                tickData.push({
-                    time: unixSec,
-                    open: parseFloat(cols[2]),
-                    high: parseFloat(cols[3]),
-                    low: parseFloat(cols[4]),
-                    close: parseFloat(cols[5]),
-                    price: parseFloat(cols[5]), // 終値を現在価格とする
-                    volume: cols[6] ? parseFloat(cols[6]) : 0
-                });
-            }
+        const open = parseFloat(cols[oIdx]);
+        const high = parseFloat(cols[hIdx]);
+        const low = parseFloat(cols[lIdx]);
+        const close = parseFloat(cols[cIdx]);
+
+        if (unixSec && !isNaN(close)) {
+            allRawData.push({
+                time: unixSec,
+                open: isNaN(open) ? close : open,
+                high: isNaN(high) ? close : high,
+                low: isNaN(low) ? close : low,
+                close: close,
+                price: close,
+                volume: cols[vIdx] ? parseFloat(cols[vIdx]) : 0
+            });
         }
     }
-    currentIndex = 0;
-
-    // ロード時に全データを一括描画してフィットさせる
-    if (tickData.length > 0 && typeof candleSeries !== 'undefined' && candleSeries) {
-        candleSeries.setData(tickData.map(d => ({
-            time: d.time,
-            open: d.open,
-            high: d.high,
-            low: d.low,
-            close: d.close
-        })));
-        if (typeof chart !== 'undefined' && chart) {
-            chart.timeScale().fitContent();
-        }
-    }
+    allRawData.sort((a, b) => a.time - b.time);
 }
 
-// 2. リプレイ再生コントロール
+// 2. リプレイ再生（1足ずつ生成・更新）
 function startReplay() {
-    if (tickData.length === 0) {
-        alert("データがロードされていません。'Load' ボタンを押してください。");
+    if (replayQueue.length === 0) {
+        alert("リプレイデータがありません。日時を指定して 'Load' を押してください。");
         return;
     }
     if (replayTimer) clearInterval(replayTimer);
 
     replayTimer = setInterval(() => {
-        if (currentIndex >= tickData.length) {
+        if (currentIndex >= replayQueue.length) {
             clearInterval(replayTimer);
-            alert("リプレイが終了しました。");
+            alert("指定期間のリプレイが終了いたしました。");
             return;
         }
 
-        const currentBar = tickData[currentIndex];
+        const bar = replayQueue[currentIndex];
 
-        // チャートに1足ずつリアルタイム更新
+        // 1足ずつ動的に追加・更新
         if (typeof candleSeries !== 'undefined' && candleSeries) {
             candleSeries.update({
-                time: currentBar.time,
-                open: currentBar.open,
-                high: currentBar.high,
-                low: currentBar.low,
-                close: currentBar.close
+                time: bar.time,
+                open: bar.open,
+                high: bar.high,
+                low: bar.low,
+                close: bar.close
             });
         }
 
-        // ツールバーの Bid / Ask 表示を更新
-        updatePriceHeader(currentBar.price);
-
-        // 建玉の損益をリアルタイム更新
-        processPaperTrade(currentBar);
+        updatePriceHeader(bar.price);
+        processPaperTrade(bar);
 
         currentIndex++;
     }, replaySpeed);
@@ -136,23 +170,21 @@ function pauseReplay() {
 
 function changeReplaySpeed(val) {
     replaySpeed = parseInt(val);
-    if (replayTimer) {
-        startReplay(); // 新しい速度でタイマー再開
-    }
+    if (replayTimer) startReplay();
 }
 
-// 3. デモトレード（注文・決済）処理
+// 3. デモトレード処理
 function placePaperOrder(side) {
     if (paperAccount.position) {
-        alert("すでにポジションを保有しています。CLOSEで決済してください。");
+        alert("すでにポジションを保有しています。");
         return;
     }
-    if (tickData.length === 0 || currentIndex === 0) {
+    if (replayQueue.length === 0 || currentIndex === 0) {
         alert("リプレイを開始（▶）してから注文してください。");
         return;
     }
 
-    const currentBar = tickData[currentIndex - 1];
+    const currentBar = replayQueue[currentIndex - 1];
     paperAccount.position = {
         side: side,
         entryPrice: currentBar.price,
@@ -164,7 +196,7 @@ function placePaperOrder(side) {
 function closePaperPosition() {
     if (!paperAccount.position) return;
 
-    const currentBar = tickData[currentIndex - 1];
+    const currentBar = replayQueue[currentIndex - 1];
     const pos = paperAccount.position;
     let pnl = (pos.side === 'BUY') 
         ? (currentBar.price - pos.entryPrice) * pos.qty 
