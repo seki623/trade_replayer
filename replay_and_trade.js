@@ -57,6 +57,19 @@ async function loadSelectedRange() {
         const historyData = allRawData.filter(d => d.time < startTs);
         replayQueue = allRawData.filter(d => d.time >= startTs && d.time <= endTs);
 
+	
+	// replay_and_trade_3.js 内
+	if (typeof candleSeries !== 'undefined' && candleSeries) {
+    		candleSeries.setData(historyData.map(d => ({
+        	time: d.time, open: d.open, high: d.high, low: d.low, close: d.close
+    	})));
+    
+    	// PDO/PDH/PDL/PDC ラインを描画
+    	if (typeof renderPeriodLines === 'function') {
+        	renderPeriodLines(historyData);
+   	 }
+	
+
         if (replayQueue.length === 0) {
             alert(`【${symbol}】指定の期間データがCSV内に見つかりませんでした。`);
             return;
