@@ -1,5 +1,5 @@
 // ==========================================
-// TickForge: 取引マーカー & ポジションライン対応版
+// TickForge: デフォルト銘柄選択対応 & トレード描画完全修正版
 // ==========================================
 
 let allRawData = [];       // CSV解析データ
@@ -19,16 +19,8 @@ let tradeLines = [];
 
 // 1. 指定された範囲のCSVをロード＆フィルタリング
 async function loadSelectedRange() {
-    // 選択された銘柄を取得（デフォルトはXAUUSD）
-	const symbolEl = document.getElementById('symbolSelect');
-	const symbol = symbolEl ? symbolEl.value : 'XAUUSD';
-
-	const startDate = new Date(startVal);
-	const yyyy = startDate.getFullYear();
-	const mm = String(startDate.getMonth() + 1).padStart(2, '0');
-
-	// 動的に銘柄フォルダーを参照するように変更
-	const filePath = `./${symbol}/${yyyy}-${mm}.csv`;
+    const startVal = document.getElementById('startTime').value;
+    const endVal = document.getElementById('endTime').value;
 
     if (!startVal || !endVal) {
         alert("開始日時と終了日時を正しく指定してください。");
@@ -43,10 +35,16 @@ async function loadSelectedRange() {
         return;
     }
 
+    // デフォルトの銘柄選択ドロップダウン (#symbol-select) から現在選択中の銘柄を取得
+    const symbolSelectEl = document.getElementById('symbol-select');
+    const currentSymbol = symbolSelectEl ? symbolSelectEl.value : (typeof currentSymbol !== 'undefined' ? currentSymbol : 'XAUUSD');
+
     const startDate = new Date(startVal);
     const yyyy = startDate.getFullYear();
     const mm = String(startDate.getMonth() + 1).padStart(2, '0');
-    const filePath = `./XAUUSD/${yyyy}-${mm}.csv`;
+    
+    // 選択中の銘柄フォルダーを参照 (例: ./BTCUSDT/2025-07.csv, ./XAUUSD/2025-07.csv)
+    const filePath = `./${currentSymbol}/${yyyy}-${mm}.csv`;
 
     pauseReplay();
     clearTradeVisuals(); // 過去のトレード描画をリセット
@@ -54,7 +52,7 @@ async function loadSelectedRange() {
     try {
         const response = await fetch(filePath);
         if (!response.ok) {
-            throw new Error(`ファイルが見つかりません: ${filePath}\nGitHubリポジトリ内にファイルが配置されているかご確認ください。`);
+            throw new Error(`【${currentSymbol}】のデータが見つかりません:\n${filePath}\nリポジトリ内にフォルダーとCSVファイルが配置されているかご確認ください。`);
         }
         const text = await response.text();
         
@@ -64,7 +62,7 @@ async function loadSelectedRange() {
         replayQueue = allRawData.filter(d => d.time >= startTs && d.time <= endTs);
 
         if (replayQueue.length === 0) {
-            alert("指定された期間のデータがCSV内に見つかりませんでした。");
+            alert(`指定された期間のデータがCSV内に見つかりませんでした。`);
             return;
         }
 
@@ -78,7 +76,7 @@ async function loadSelectedRange() {
         }
 
         currentIndex = 0;
-        alert(`【準備完了】\n過去データ: ${historyData.length}本描画済み\nリプレイ対象: ${replayQueue.length}本\n▶ ボタンを押すとローソク足の生成が始まります。`);
+        alert(`【${currentSymbol} 準備完了】\n過去データ: ${historyData.length}本描画済み\nリプレイ対象: ${replayQueue.length}本\n▶ ボタンを押すとローソク足の生成が始まります。`);
 
     } catch (err) {
         console.error("ロードエラー:", err);
@@ -181,7 +179,7 @@ function changeReplaySpeed(val) {
     if (replayTimer) startReplay();
 }
 
-// 3. デモトレード（注文・決済・描画処理）
+// 3. デモトレード（注文・決済処理）
 function placePaperOrder(side) {
     if (paperAccount.position) {
         alert("すでにポジションを保有しています。");
@@ -201,7 +199,7 @@ function placePaperOrder(side) {
         qty: 1
     };
 
-    // チャート上にエントリーマーカーを表示
+    // オープン位置に矢印マーカーを追加
     const marker = {
         time: currentBar.time,
         position: side === 'BUY' ? 'belowBar' : 'aboveBar',
@@ -226,7 +224,7 @@ function closePaperPosition() {
         ? (currentBar.price - pos.entryPrice) * pos.qty 
         : (pos.entryPrice - currentBar.price) * pos.qty;
 
-    // 決済マーカーを追加
+    // クローズ位置にスクエアマーカーを追加
     const closeMarker = {
         time: currentBar.time,
         position: pos.side === 'BUY' ? 'aboveBar' : 'belowBar',
@@ -245,10 +243,9 @@ function closePaperPosition() {
     updateAccountUI(currentBar.price);
 }
 
-// 4. チャート描画ヘルパー
+// 4. チャート描画処理 (Lightweight Charts v3/v4 完全対応)
 function setChartMarkers() {
-    if (typeof candleSeries !== 'undefined' && candleSeries.setMarkers) {
-        // 時系列順にソートして適用
+    if (typeof candleSeries !== 'undefined' && candleSeries && candleSeries.setMarkers) {
         tradeMarkers.sort((a, b) => a.time - b.time);
         candleSeries.setMarkers(tradeMarkers);
     }
@@ -257,45 +254,46 @@ function setChartMarkers() {
 function drawTradeLine(startTime, startPrice, endTime, endPrice, isWin) {
     if (typeof chart === 'undefined' || !chart) return;
 
-    // Lightweight Charts の LineSeries を使用してラインを作成
     const lineColor = isWin ? '#26a69a' : '#ef5350';
-    
-    // addSeries 互換処理
     let lineSeries = null;
-    if (LightweightCharts.LineSeries && chart.addSeries) {
-        try {
+
+    // 軽量チャートのバージョン差分を安全に吸収して LineSeries を作成
+    try {
+        if (typeof LightweightCharts !== 'undefined' && LightweightCharts.LineSeries) {
             lineSeries = chart.addSeries(LightweightCharts.LineSeries, {
                 color: lineColor,
                 lineWidth: 2,
-                lineStyle: 2, // 点線 (Dotted/Dashed)
+                lineStyle: 2, // 点線
                 crosshairMarkerVisible: false,
                 priceLineVisible: false,
                 lastValueVisible: false,
             });
-        } catch(e) {}
-    }
-    if (!lineSeries) {
-        lineSeries = chart.addLineSeries({
-            color: lineColor,
-            lineWidth: 2,
-            lineStyle: 2,
-            crosshairMarkerVisible: false,
-            priceLineVisible: false,
-            lastValueVisible: false,
-        });
+        } else if (chart.addLineSeries) {
+            lineSeries = chart.addLineSeries({
+                color: lineColor,
+                lineWidth: 2,
+                lineStyle: 2, // 点線
+                crosshairMarkerVisible: false,
+                priceLineVisible: false,
+                lastValueVisible: false,
+            });
+        }
+    } catch(e) {
+        console.error("ライン描画エラー:", e);
     }
 
-    lineSeries.setData([
-        { time: startTime, value: startPrice },
-        { time: endTime, value: endPrice }
-    ]);
-
-    tradeLines.push(lineSeries);
+    if (lineSeries) {
+        lineSeries.setData([
+            { time: startTime, value: startPrice },
+            { time: endTime, value: endPrice }
+        ]);
+        tradeLines.push(lineSeries);
+    }
 }
 
 function clearTradeVisuals() {
     tradeMarkers = [];
-    if (typeof candleSeries !== 'undefined' && candleSeries.setMarkers) {
+    if (typeof candleSeries !== 'undefined' && candleSeries && candleSeries.setMarkers) {
         candleSeries.setMarkers([]);
     }
     if (typeof chart !== 'undefined' && chart) {
