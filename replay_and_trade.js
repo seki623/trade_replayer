@@ -1,5 +1,5 @@
 // ==========================================
-// TickForge: リプレイ & ペパートレード制御 script
+// TickForge: リプレイ & ペパートレード制御 script (保有中マーカー即時反映版)
 // ==========================================
 
 let allRawData = [];
@@ -34,11 +34,9 @@ async function loadSelectedRange() {
         return;
     }
 
-    // 既存の銘柄ドロップダウン (#symbol-select) から現在選択中の銘柄を取得
     const symbolSelectEl = document.getElementById('symbol-select');
     const symbol = symbolSelectEl ? symbolSelectEl.value : 'XAUUSD';
 
-    // 開始日時の年月から該当するCSVパスを特定 (例: ./XAUUSD/2025-07.csv)
     const startDate = new Date(startVal);
     const yyyy = startDate.getFullYear();
     const mm = String(startDate.getMonth() + 1).padStart(2, '0');
@@ -197,7 +195,8 @@ function placePaperOrder(side) {
         qty: 1
     };
 
-    const marker = {
+    // オープン時の目印（BUY: 足の下に▲ / SELL: 足の上に▼）
+    const openMarker = {
         time: currentBar.time,
         position: side === 'BUY' ? 'belowBar' : 'aboveBar',
         color: side === 'BUY' ? '#26a69a' : '#ef5350',
@@ -205,7 +204,7 @@ function placePaperOrder(side) {
         text: side === 'BUY' ? `BUY @${currentBar.price.toFixed(2)}` : `SELL @${currentBar.price.toFixed(2)}`
     };
     
-    tradeMarkers.push(marker);
+    tradeMarkers.push(openMarker);
     setChartMarkers();
     updateAccountUI(currentBar.price);
 }
@@ -220,6 +219,7 @@ function closePaperPosition() {
         ? (currentBar.price - pos.entryPrice) * pos.qty 
         : (pos.entryPrice - currentBar.price) * pos.qty;
 
+    // クローズ時の目印
     const closeMarker = {
         time: currentBar.time,
         position: pos.side === 'BUY' ? 'aboveBar' : 'belowBar',
@@ -240,9 +240,16 @@ function closePaperPosition() {
 
 // 4. マーカー＆トレード線描画処理
 function setChartMarkers() {
-    if (typeof candleSeries !== 'undefined' && candleSeries && candleSeries.setMarkers) {
+    if (typeof candleSeries !== 'undefined' && candleSeries) {
+        // 時系列順にソート（Lightweight Chartsの必須要求）
         tradeMarkers.sort((a, b) => a.time - b.time);
-        candleSeries.setMarkers(tradeMarkers);
+        
+        // v4 / v3 両方の API 呼び出しに対応
+        if (typeof createSeriesMarkers === 'function') {
+            createSeriesMarkers(candleSeries, tradeMarkers);
+        } else if (candleSeries.setMarkers) {
+            candleSeries.setMarkers([...tradeMarkers]);
+        }
     }
 }
 
@@ -287,8 +294,10 @@ function drawTradeLine(startTime, startPrice, endTime, endPrice, isWin) {
 
 function clearTradeVisuals() {
     tradeMarkers = [];
-    if (typeof candleSeries !== 'undefined' && candleSeries && candleSeries.setMarkers) {
-        candleSeries.setMarkers([]);
+    if (typeof candleSeries !== 'undefined' && candleSeries) {
+        if (candleSeries.setMarkers) {
+            candleSeries.setMarkers([]);
+        }
     }
     if (typeof chart !== 'undefined' && chart) {
         tradeLines.forEach(line => {
