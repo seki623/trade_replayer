@@ -13,9 +13,7 @@ let paperAccount = {
     position: null
 };
 
-let tradeMarkers = [];
 let tradeLines = [];
-let slTpPriceLines = []; // SL / TP ライン保持用
 
 // 1. CSVデータロード処理
 async function loadSelectedRange() {
@@ -176,7 +174,7 @@ function changeReplaySpeed(val) {
     if (replayTimer) startReplay();
 }
 
-// 3. 注文・決済処理
+// 3. 注文・手動設定 SL/TP 読み込み
 function placePaperOrder(side) {
     if (paperAccount.position) {
         alert("すでにポジションを保有しています。");
@@ -189,17 +187,19 @@ function placePaperOrder(side) {
 
     const currentBar = replayQueue[currentIndex - 1];
     
-    // デフォルトの SL/TP 幅設定（例: 2.0 ドル幅）
-    const slDistance = 2.0;
-    const tpDistance = 4.0;
+    // 入力欄からの SL/TP 取得 (未入力の場合は null)
+    const slVal = parseFloat(document.getElementById('input-sl').value);
+    const tpVal = parseFloat(document.getElementById('input-tp').value);
     
-    let slPrice = 0, tpPrice = 0;
-    if (side === 'BUY') {
-        slPrice = currentBar.price - slDistance;
-        tpPrice = currentBar.price + tpDistance;
-    } else {
-        slPrice = currentBar.price + slDistance;
-        tpPrice = currentBar.price - tpDistance;
+    let slPrice = null;
+    let tpPrice = null;
+
+    // 入力値が「価格そのもの」か「エントリーからの幅」かを自動判定
+    if (!isNaN(slVal)) {
+        slPrice = (slVal > 100) ? slVal : (side === 'BUY' ? currentBar.price - slVal : currentBar.price + slVal);
+    }
+    if (!isNaN(tpVal)) {
+        tpPrice = (tpVal > 100) ? tpVal : (side === 'BUY' ? currentBar.price + tpVal : currentBar.price - tpVal);
     }
 
     paperAccount.position = {
@@ -211,20 +211,8 @@ function placePaperOrder(side) {
         qty: 1
     };
 
-    // マーカーオブジェクト生成
-    const openMarker = {
-        time: currentBar.time,
-        position: side === 'BUY' ? 'belowBar' : 'aboveBar',
-        color: side === 'BUY' ? '#26a69a' : '#ef5350',
-        shape: side === 'BUY' ? 'arrowUp' : 'arrowDown',
-        text: side === 'BUY' ? `BUY @${currentBar.price.toFixed(2)}` : `SELL @${currentBar.price.toFixed(2)}`
-    };
-    
-    tradeMarkers.push(openMarker);
-    setChartMarkers();
-    
-    // チャート上に Position / SL / TP の水平線を固定配置
-    renderSlTpLines();
+    // 保有中のみ表示するマーク（BUY: 足の下に▲ / SELL: 足の上に▼）
+    showActiveMarker(currentBar.time, side);
     updateAccountUI(currentBar.price);
 }
 
@@ -235,106 +223,56 @@ function closePaperPosition(reason = 'MANUAL') {
     const pos = paperAccount.position;
 
     let exitPrice = currentBar.price;
-    if (reason === 'SL') exitPrice = pos.sl;
-    if (reason === 'TP') exitPrice = pos.tp;
+    if (reason === 'SL' && pos.sl) exitPrice = pos.sl;
+    if (reason === 'TP' && pos.tp) exitPrice = pos.tp;
 
     let pnl = (pos.side === 'BUY') 
         ? (exitPrice - pos.entryPrice) * pos.qty 
         : (pos.entryPrice - exitPrice) * pos.qty;
 
-    const closeMarker = {
-        time: currentBar.time,
-        position: pos.side === 'BUY' ? 'aboveBar' : 'belowBar',
-        color: pnl >= 0 ? '#26a69a' : '#ef5350',
-        shape: 'square',
-        text: `CLOSE(${reason}) @${exitPrice.toFixed(2)} (${pnl >= 0 ? '+' : ''}${pnl.toFixed(1)})`
-    };
-    tradeMarkers.push(closeMarker);
-    setChartMarkers();
+    // クローズしたためマークを消去
+    clearMarkers();
 
-    // エントリーからクローズを繋ぐ点線を描画
+    // エントリーからクローズまでの点線を描画
     drawTradeLine(pos.entryTime, pos.entryPrice, currentBar.time, exitPrice, pnl >= 0);
 
-    removeSlTpLines();
     paperAccount.balance += pnl;
     paperAccount.position = null;
     updateAccountUI(currentBar.price);
 }
 
-// 4. マーカー・水平線（SL/TP）・点線描画処理
-function setChartMarkers() {
+// 4. マーカー操作（ポジション保有中のみ表示）
+function showActiveMarker(time, side) {
     if (typeof candleSeries === 'undefined' || !candleSeries) return;
 
-    // 時系列ソート
-    tradeMarkers.sort((a, b) => a.time - b.time);
+    const marker = {
+        time: time,
+        position: side === 'BUY' ? 'belowBar' : 'aboveBar',
+        color: side === 'BUY' ? '#26a69a' : '#ef5350',
+        shape: side === 'BUY' ? 'arrowUp' : 'arrowDown',
+        text: side === 'BUY' ? '▲ BUY' : '▼ SELL'
+    };
 
     try {
         if (typeof LightweightCharts !== 'undefined' && typeof LightweightCharts.createSeriesMarkers === 'function') {
-            LightweightCharts.createSeriesMarkers(candleSeries, tradeMarkers);
+            LightweightCharts.createSeriesMarkers(candleSeries, [marker]);
         } else if (typeof candleSeries.setMarkers === 'function') {
-            candleSeries.setMarkers(tradeMarkers);
+            candleSeries.setMarkers([marker]);
         }
     } catch (e) {
-        console.error("マーカー描画エラー:", e);
+        console.error("マーク描画エラー:", e);
     }
 }
 
-// チャート上に Entry / SL / TP のプライスラインを描画
-function renderSlTpLines() {
-    removeSlTpLines();
-    if (!paperAccount.position || typeof candleSeries === 'undefined' || !candleSeries) return;
-
-    const pos = paperAccount.position;
-
+function clearMarkers() {
+    if (typeof candleSeries === 'undefined' || !candleSeries) return;
     try {
-        // Entry Line
-        const entryLine = candleSeries.createPriceLine({
-            price: pos.entryPrice,
-            color: pos.side === 'BUY' ? '#26a69a' : '#ef5350',
-            lineWidth: 1,
-            lineStyle: 0, // Solid
-            axisLabelVisible: true,
-            title: `${pos.side} @${pos.entryPrice.toFixed(2)}`,
-        });
-        slTpPriceLines.push(entryLine);
-
-        // SL Line
-        if (pos.sl) {
-            const slLine = candleSeries.createPriceLine({
-                price: pos.sl,
-                color: '#ef5350',
-                lineWidth: 1,
-                lineStyle: 2, // Dashed
-                axisLabelVisible: true,
-                title: `SL @${pos.sl.toFixed(2)}`,
-            });
-            slTpPriceLines.push(slLine);
+        if (typeof LightweightCharts !== 'undefined' && typeof LightweightCharts.createSeriesMarkers === 'function') {
+            LightweightCharts.createSeriesMarkers(candleSeries, []);
+        } else if (typeof candleSeries.setMarkers === 'function') {
+            candleSeries.setMarkers([]);
         }
-
-        // TP Line
-        if (pos.tp) {
-            const tpLine = candleSeries.createPriceLine({
-                price: pos.tp,
-                color: '#26a69a',
-                lineWidth: 1,
-                lineStyle: 2, // Dashed
-                axisLabelVisible: true,
-                title: `TP @${pos.tp.toFixed(2)}`,
-            });
-            slTpPriceLines.push(tpLine);
-        }
-    } catch(e) {
-        console.error("SL/TPライン描画エラー:", e);
-    }
-}
-
-function removeSlTpLines() {
-    if (typeof candleSeries !== 'undefined' && candleSeries) {
-        slTpPriceLines.forEach(line => {
-            try { candleSeries.removePriceLine(line); } catch(e) {}
-        });
-    }
-    slTpPriceLines = [];
+    } catch(e){}
 }
 
 function drawTradeLine(startTime, startPrice, endTime, endPrice, isWin) {
@@ -377,17 +315,7 @@ function drawTradeLine(startTime, startPrice, endTime, endPrice, isWin) {
 }
 
 function clearTradeVisuals() {
-    tradeMarkers = [];
-    removeSlTpLines();
-    if (typeof candleSeries !== 'undefined' && candleSeries) {
-        try {
-            if (typeof LightweightCharts !== 'undefined' && typeof LightweightCharts.createSeriesMarkers === 'function') {
-                LightweightCharts.createSeriesMarkers(candleSeries, []);
-            } else if (typeof candleSeries.setMarkers === 'function') {
-                candleSeries.setMarkers([]);
-            }
-        } catch(e){}
-    }
+    clearMarkers();
     if (typeof chart !== 'undefined' && chart) {
         tradeLines.forEach(line => {
             try { chart.removeSeries(line); } catch(e) {}
@@ -396,7 +324,7 @@ function clearTradeVisuals() {
     tradeLines = [];
 }
 
-// 5. リプレイ中のSL/TP判定ロジック
+// 5. リプレイ中のSL/TP判定（設定がある場合のみ動作）
 function processPaperTrade(bar) {
     if (!paperAccount.position) return;
 
@@ -404,11 +332,11 @@ function processPaperTrade(bar) {
 
     // BUY ポジションの判定
     if (pos.side === 'BUY') {
-        if (bar.low <= pos.sl) {
+        if (pos.sl !== null && bar.low <= pos.sl) {
             closePaperPosition('SL');
             return;
         }
-        if (bar.high >= pos.tp) {
+        if (pos.tp !== null && bar.high >= pos.tp) {
             closePaperPosition('TP');
             return;
         }
@@ -416,11 +344,11 @@ function processPaperTrade(bar) {
 
     // SELL ポジションの判定
     if (pos.side === 'SELL') {
-        if (bar.high >= pos.sl) {
+        if (pos.sl !== null && bar.high >= pos.sl) {
             closePaperPosition('SL');
             return;
         }
-        if (bar.low <= pos.tp) {
+        if (pos.tp !== null && bar.low <= pos.sl) {
             closePaperPosition('TP');
             return;
         }
