@@ -1,23 +1,22 @@
 // ==========================================
-// TickForge: デフォルト銘柄選択対応 & トレード描画完全修正版
+// TickForge: リプレイ & ペパートレード制御 script
 // ==========================================
 
-let allRawData = [];       // CSV解析データ
-let replayQueue = [];      // リプレイ対象データ
+let allRawData = [];
+let replayQueue = [];
 let currentIndex = 0;
 let replayTimer = null;
-let replaySpeed = 500;     // ms
+let replaySpeed = 500;
 
 let paperAccount = {
     balance: 1000000,
     position: null
 };
 
-// マーカーとラインの保持用
 let tradeMarkers = [];
 let tradeLines = [];
 
-// 1. 指定された範囲のCSVをロード＆フィルタリング
+// 1. 指定期間・選択銘柄のCSVロード処理
 async function loadSelectedRange() {
     const startVal = document.getElementById('startTime').value;
     const endVal = document.getElementById('endTime').value;
@@ -35,24 +34,23 @@ async function loadSelectedRange() {
         return;
     }
 
-    // デフォルトの銘柄選択ドロップダウン (#symbol-select) から現在選択中の銘柄を取得
+    // 既存の銘柄ドロップダウン (#symbol-select) から現在選択中の銘柄を取得
     const symbolSelectEl = document.getElementById('symbol-select');
-    const currentSymbol = symbolSelectEl ? symbolSelectEl.value : (typeof currentSymbol !== 'undefined' ? currentSymbol : 'XAUUSD');
+    const symbol = symbolSelectEl ? symbolSelectEl.value : 'XAUUSD';
 
+    // 開始日時の年月から該当するCSVパスを特定 (例: ./XAUUSD/2025-07.csv)
     const startDate = new Date(startVal);
     const yyyy = startDate.getFullYear();
     const mm = String(startDate.getMonth() + 1).padStart(2, '0');
-    
-    // 選択中の銘柄フォルダーを参照 (例: ./BTCUSDT/2025-07.csv, ./XAUUSD/2025-07.csv)
-    const filePath = `./${currentSymbol}/${yyyy}-${mm}.csv`;
+    const filePath = `./${symbol}/${yyyy}-${mm}.csv`;
 
     pauseReplay();
-    clearTradeVisuals(); // 過去のトレード描画をリセット
+    clearTradeVisuals();
 
     try {
         const response = await fetch(filePath);
         if (!response.ok) {
-            throw new Error(`【${currentSymbol}】のデータが見つかりません:\n${filePath}\nリポジトリ内にフォルダーとCSVファイルが配置されているかご確認ください。`);
+            throw new Error(`【${symbol}】のCSVデータが見つかりません:\n${filePath}\nリポジトリ内に指定のファイルが存在するかご確認ください。`);
         }
         const text = await response.text();
         
@@ -62,7 +60,7 @@ async function loadSelectedRange() {
         replayQueue = allRawData.filter(d => d.time >= startTs && d.time <= endTs);
 
         if (replayQueue.length === 0) {
-            alert(`指定された期間のデータがCSV内に見つかりませんでした。`);
+            alert(`【${symbol}】指定の期間データがCSV内に見つかりませんでした。`);
             return;
         }
 
@@ -76,7 +74,7 @@ async function loadSelectedRange() {
         }
 
         currentIndex = 0;
-        alert(`【${currentSymbol} 準備完了】\n過去データ: ${historyData.length}本描画済み\nリプレイ対象: ${replayQueue.length}本\n▶ ボタンを押すとローソク足の生成が始まります。`);
+        alert(`【${symbol} ロード完了】\n過去背景データ: ${historyData.length}本\nリプレイ再生対象: ${replayQueue.length}本\n▶ ボタンを押すと再生を開始します。`);
 
     } catch (err) {
         console.error("ロードエラー:", err);
@@ -136,10 +134,10 @@ function parseCSV(text) {
     allRawData.sort((a, b) => a.time - b.time);
 }
 
-// 2. リプレイ再生
+// 2. リプレイ再生コントロール
 function startReplay() {
     if (replayQueue.length === 0) {
-        alert("リプレイデータがありません。日時を指定して 'Load' を押してください。");
+        alert("リプレイデータがセットされていません。日時を指定して 'Load' を押してください。");
         return;
     }
     if (replayTimer) clearInterval(replayTimer);
@@ -147,7 +145,7 @@ function startReplay() {
     replayTimer = setInterval(() => {
         if (currentIndex >= replayQueue.length) {
             clearInterval(replayTimer);
-            alert("指定期間のリプレイが終了いたしました。");
+            alert("リプレイが終了しました。");
             return;
         }
 
@@ -179,7 +177,7 @@ function changeReplaySpeed(val) {
     if (replayTimer) startReplay();
 }
 
-// 3. デモトレード（注文・決済処理）
+// 3. 注文・決済・描画処理
 function placePaperOrder(side) {
     if (paperAccount.position) {
         alert("すでにポジションを保有しています。");
@@ -199,7 +197,6 @@ function placePaperOrder(side) {
         qty: 1
     };
 
-    // オープン位置に矢印マーカーを追加
     const marker = {
         time: currentBar.time,
         position: side === 'BUY' ? 'belowBar' : 'aboveBar',
@@ -210,7 +207,6 @@ function placePaperOrder(side) {
     
     tradeMarkers.push(marker);
     setChartMarkers();
-
     updateAccountUI(currentBar.price);
 }
 
@@ -224,7 +220,6 @@ function closePaperPosition() {
         ? (currentBar.price - pos.entryPrice) * pos.qty 
         : (pos.entryPrice - currentBar.price) * pos.qty;
 
-    // クローズ位置にスクエアマーカーを追加
     const closeMarker = {
         time: currentBar.time,
         position: pos.side === 'BUY' ? 'aboveBar' : 'belowBar',
@@ -235,7 +230,7 @@ function closePaperPosition() {
     tradeMarkers.push(closeMarker);
     setChartMarkers();
 
-    // エントリーから決済までを繋ぐラインを描画
+    // エントリーからクローズを繋ぐ点線を描画
     drawTradeLine(pos.entryTime, pos.entryPrice, currentBar.time, currentBar.price, pnl >= 0);
 
     paperAccount.balance += pnl;
@@ -243,7 +238,7 @@ function closePaperPosition() {
     updateAccountUI(currentBar.price);
 }
 
-// 4. チャート描画処理 (Lightweight Charts v3/v4 完全対応)
+// 4. マーカー＆トレード線描画処理
 function setChartMarkers() {
     if (typeof candleSeries !== 'undefined' && candleSeries && candleSeries.setMarkers) {
         tradeMarkers.sort((a, b) => a.time - b.time);
@@ -257,9 +252,8 @@ function drawTradeLine(startTime, startPrice, endTime, endPrice, isWin) {
     const lineColor = isWin ? '#26a69a' : '#ef5350';
     let lineSeries = null;
 
-    // 軽量チャートのバージョン差分を安全に吸収して LineSeries を作成
     try {
-        if (typeof LightweightCharts !== 'undefined' && LightweightCharts.LineSeries) {
+        if (typeof LightweightCharts !== 'undefined' && LightweightCharts.LineSeries && chart.addSeries) {
             lineSeries = chart.addSeries(LightweightCharts.LineSeries, {
                 color: lineColor,
                 lineWidth: 2,
@@ -272,7 +266,7 @@ function drawTradeLine(startTime, startPrice, endTime, endPrice, isWin) {
             lineSeries = chart.addLineSeries({
                 color: lineColor,
                 lineWidth: 2,
-                lineStyle: 2, // 点線
+                lineStyle: 2,
                 crosshairMarkerVisible: false,
                 priceLineVisible: false,
                 lastValueVisible: false,
@@ -309,7 +303,6 @@ function processPaperTrade(bar) {
     updateAccountUI(bar.price);
 }
 
-// 5. UI更新ヘルパー
 function updatePriceHeader(price) {
     const $bid = document.getElementById('bid-val');
     const $ask = document.getElementById('ask-val');

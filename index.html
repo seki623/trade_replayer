@@ -18,6 +18,13 @@ body{background:#0a0a0f;color:#d1d4dc;font-family:'Segoe UI',system-ui,sans-seri
 #status.ok{background:#26a69a}
 #status.err{background:#ef5350}
 
+.source-btn{
+  background:#14141f;color:#888;border:1px solid #2a2a3d;
+  padding:4px 8px;font-size:11px;border-radius:4px;cursor:pointer;font-weight:bold;
+  transition:all 0.15s;flex-shrink:0;
+}
+.source-btn.active{background:#2962ff;color:#fff;border-color:#2962ff}
+
 #symbol-select, .replay-select{
   background:#14141f;color:#d1d4dc;border:1px solid #2a2a3d;
   padding:4px 8px;font-size:12px;border-radius:4px;outline:none;cursor:pointer;
@@ -32,7 +39,7 @@ body{background:#0a0a0f;color:#d1d4dc;font-family:'Segoe UI',system-ui,sans-seri
 .tf-btn:hover{color:#aaa;background:#1c1c30}
 .tf-btn.active{background:#2962ff;color:#fff}
 
-/* ── リプレイ & 注文 UI スタイル ── */
+/* リプレイ & 注文 UI */
 .replay-ctrl-group{display:flex;align-items:center;gap:4px;background:#10101a;padding:2px 6px;border-radius:4px;border:1px solid #1f1f30}
 .btn-replay{background:#1f1f30;color:#d1d4dc;border:none;padding:3px 8px;font-size:11px;border-radius:3px;cursor:pointer;font-weight:600}
 .btn-replay:hover{background:#2a2a42}
@@ -51,7 +58,7 @@ body{background:#0a0a0f;color:#d1d4dc;font-family:'Segoe UI',system-ui,sans-seri
 #info{display:flex;gap:12px;margin-left:auto;align-items:center;font-size:12px;font-family:'Consolas','SF Mono',monospace;flex-shrink:0}
 .lbl{color:#444;font-size:9px;margin-right:1px}
 .bid{color:#26a69a}.ask{color:#ef5350}
-.spread{color:#555}.spread.crossed{color:#ff1744;font-weight:700}
+.spread{color:#555}
 #tps{color:#333;font-size:10px}
 #candle-ticks{color:#333;font-size:10px}
 
@@ -62,25 +69,21 @@ body{background:#0a0a0f;color:#d1d4dc;font-family:'Segoe UI',system-ui,sans-seri
 
 <div id="toolbar">
   <div id="status" class="ok"></div>
+  
+  <!-- データソース選択ボタン -->
+  <button id="btn-mode-live" class="source-btn active" onclick="switchDataMode('live')">リアルタイム</button>
+  <button id="btn-mode-replay" class="source-btn" onclick="switchDataMode('replay')">リプレイ</button>
+
   <select id="symbol-select"></select>
   <div class="tf-group" id="tf-group"></div>
 
   <!-- リプレイ & デモトレード コントロール -->
-  <!-- リプレイ & デモトレード コントロール -->
-  <div class="replay-ctrl-group">
-  <!-- 銘柄選択を追加 -->
-  <select id="symbolSelect" class="replay-select">
-    <option value="XAUUSD">XAUUSD (ゴールド)</option>
-    <option value="XAGUSD">XAGUSD (シルバー)</option>
-    <option value="JP225">JP225 (日経225)</option>
-  </select>
-
-  <span style="font-size:10px;color:#aaa">開始:</span>
-  <input type="datetime-local" id="startTime" class="replay-select" value="2025-07-01T09:00">
-  <span style="font-size:10px;color:#aaa">終了:</span>
-  <input type="datetime-local" id="endTime" class="replay-select" value="2025-07-01T17:00">
-
-      
+  <div class="replay-ctrl-group" id="replay-controls">
+    <span style="font-size:10px;color:#aaa">開始:</span>
+    <input type="datetime-local" id="startTime" class="replay-select" value="2025-07-01T09:00">
+    <span style="font-size:10px;color:#aaa">終了:</span>
+    <input type="datetime-local" id="endTime" class="replay-select" value="2025-07-01T17:00">
+    
     <button class="btn-replay" onclick="loadSelectedRange()">Load</button>
     <button class="btn-replay" onclick="startReplay()">▶</button>
     <button class="btn-replay" onclick="pauseReplay()">❚❚</button>
@@ -124,10 +127,7 @@ const CRYPTO = [
 ];
 const FX = [
   {sym:'USDJPY',d:3,pip:100},{sym:'EURUSD',d:5,pip:10000},{sym:'GBPUSD',d:5,pip:10000},
-  {sym:'AUDUSD',d:5,pip:10000},{sym:'USDCHF',d:5,pip:10000},{sym:'USDCAD',d:5,pip:10000},
-  {sym:'NZDUSD',d:5,pip:10000},{sym:'EURJPY',d:3,pip:100},{sym:'GBPJPY',d:3,pip:100},
-  {sym:'EURGBP',d:5,pip:10000},{sym:'EURCHF',d:5,pip:10000},{sym:'AUDCAD',d:5,pip:10000},
-  {sym:'AUDNZD',d:5,pip:10000},{sym:'XAUUSD',d:2,pip:1},
+  {sym:'XAUUSD',d:2,pip:1},{sym:'XAGUSD',d:3,pip:100},{sym:'JP225',d:1,pip:1}
 ];
 const ALL_SYMS = [...CRYPTO, ...FX];
 const SYM_MAP = new Map(ALL_SYMS.map(s => [s.sym, s]));
@@ -138,7 +138,7 @@ const TIMEFRAMES = [
   {label:'1s',sec:1},{label:'5s',sec:5},{label:'15s',sec:15},{label:'30s',sec:30},
   {label:'1m',sec:60},{label:'5m',sec:300},{label:'15m',sec:900},
   {label:'1h',sec:3600},{label:'4h',sec:14400},
-  {label:'1D',sec:86400},{label:'1W',sec:604800},{label:'1M',sec:0xFFFF},
+  {label:'1D',sec:86400}
 ];
 
 const JST = 9*3600;
@@ -149,6 +149,8 @@ let chart = null;
 let candleSeries = null, volumeSeries = null;
 let currentSymbol = 'BTCUSDT';
 let currentTfIdx = 5; // 1m
+let dataMode = 'live'; // 'live' | 'replay'
+
 let currentCandle = null, currentVolume = null;
 let candleTickCount = 0;
 let tpsCount = 0, tpsLast = performance.now();
@@ -156,41 +158,18 @@ let historyReqId = 0;
 let cachedInfo = null;
 
 let $bid, $ask, $spread, $tps, $candleTicks, $status;
-let _lastBid = '', _lastAsk = '', _lastSp = '', _lastCrossed = null;
+let _lastBid = '', _lastAsk = '', _lastSp = '';
 
-/* ── Helpers ────────────────────────────────── */
 function symInfo(sym) { return SYM_MAP.get(sym) || {sym,d:2,pip:1}; }
 function isCrypto(sym) { return CRYPTO_SET.has(sym); }
 function isTickMode() { return TIMEFRAMES[currentTfIdx].sec === 0; }
-function fmtPrice(v) { return v.toFixed(cachedInfo.d); }
-function spreadUnit() { return (currentSymbol === 'XAUUSD' || isCrypto(currentSymbol)) ? '$' : 'p'; }
-
-function candleTimeFor(tsMs) {
-  const tf = TIMEFRAMES[currentTfIdx];
-  if (tf.sec === 0) return 0;
-  const tsSec = Math.floor(tsMs/1000) + JST;
-
-  if (tf.sec === 0xFFFF) {
-    const d = new Date(tsSec * 1000);
-    return Math.floor(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), 1) / 1000);
-  }
-  if (tf.sec === 604800) {
-    const d = new Date(tsSec * 1000);
-    const day = d.getUTCDay();
-    const diff = (day + 6) % 7;
-    d.setUTCDate(d.getUTCDate() - diff);
-    d.setUTCHours(0,0,0,0);
-    return Math.floor(d.getTime() / 1000);
-  }
-  return Math.floor(tsSec / tf.sec) * tf.sec;
-}
+function fmtPrice(v) { return typeof v === 'number' ? v.toFixed(cachedInfo.d) : '--'; }
 
 function clearSeries() {
   candleSeries.setData([]);
   volumeSeries.setData([]);
 }
 
-/* ── addSeries ───────────────── */
 function addS(type, opts) {
   const map = {Candlestick:'CandlestickSeries',Histogram:'HistogramSeries'};
   const st = LightweightCharts[map[type]];
@@ -198,23 +177,10 @@ function addS(type, opts) {
   return chart['add'+type+'Series'](opts);
 }
 
-/* ── UI ─────────────────────────────────────── */
-function appendOptgroup(sel, label, items, selectedSym) {
-  const g = document.createElement('optgroup');
-  g.label = label;
-  items.forEach(({sym}) => {
-    const o = document.createElement('option');
-    o.value = sym; o.textContent = sym;
-    if (sym === selectedSym) o.selected = true;
-    g.appendChild(o);
-  });
-  sel.appendChild(g);
-}
-
 function initUI() {
   const sel = document.getElementById('symbol-select');
   appendOptgroup(sel, 'Crypto', CRYPTO, currentSymbol);
-  appendOptgroup(sel, 'FX / Commodities', FX, currentSymbol);
+  appendOptgroup(sel, 'FX / Commodities / Index', FX, currentSymbol);
   sel.onchange = e => onSymbolSelect(e.target.value);
 
   const grp = document.getElementById('tf-group');
@@ -227,40 +193,59 @@ function initUI() {
       grp.querySelectorAll('.tf-btn').forEach(x => x.classList.remove('active'));
       b.classList.add('active');
       clearSeries();
-      currentCandle = null;
-      if (!isTickMode() && isCrypto(currentSymbol)) loadHistory(currentSymbol, i);
+      if (dataMode === 'live' && !isTickMode() && isCrypto(currentSymbol)) {
+        loadHistory(currentSymbol, i);
+      }
     };
     grp.appendChild(b);
   });
 }
 
-/* ── Chart ──────────────────────────────────── */
+function appendOptgroup(sel, label, items, selectedSym) {
+  const g = document.createElement('optgroup');
+  g.label = label;
+  items.forEach(({sym}) => {
+    const o = document.createElement('option');
+    o.value = sym; o.textContent = sym;
+    if (sym === selectedSym) o.selected = true;
+    g.appendChild(o);
+  });
+  sel.appendChild(g);
+}
+
+function switchDataMode(mode) {
+  dataMode = mode;
+  document.getElementById('btn-mode-live').classList.toggle('active', mode === 'live');
+  document.getElementById('btn-mode-replay').classList.toggle('active', mode === 'replay');
+
+  resetChartState();
+
+  if (mode === 'live') {
+    if (isCrypto(currentSymbol)) {
+      loadHistory(currentSymbol, currentTfIdx);
+      connectBinance(currentSymbol);
+    }
+  } else {
+    disconnectWs();
+    if (typeof pauseReplay === 'function') pauseReplay();
+  }
+}
+
 function initChart() {
   const container = document.getElementById('chart-container');
   chart = LightweightCharts.createChart(container, {
     autoSize: true,
-    layout: {
-      background:{type:'solid',color:'#0a0a0f'},
-      textColor:'#444',
-      fontFamily:"'Consolas','SF Mono',monospace",
-      fontSize:11,
-    },
+    layout: { background:{type:'solid',color:'#0a0a0f'}, textColor:'#444', fontFamily:"'Consolas','SF Mono',monospace", fontSize:11 },
     grid:{vertLines:{color:'#111118'},horzLines:{color:'#111118'}},
-    crosshair:{
-      mode:0,
-      vertLine:{labelBackgroundColor:'#2962ff'},
-      horzLine:{labelBackgroundColor:'#2962ff'},
-    },
-    rightPriceScale:{borderColor:'#1a1a28',scaleMargins:{top:0.05,bottom:0.18}},
-    timeScale:{borderColor:'#1a1a28',timeVisible:true,secondsVisible:true,rightOffset:5},
+    rightPriceScale:{borderColor:'#1a1a28'},
+    timeScale:{borderColor:'#1a1a28',timeVisible:true,secondsVisible:true},
   });
 
   volumeSeries = addS('Histogram',{color:'#1a3a5c',priceFormat:{type:'volume'},priceScaleId:'vol'});
   volumeSeries.priceScale().applyOptions({scaleMargins:{top:0.85,bottom:0}});
 
   candleSeries = addS('Candlestick',{
-    upColor:'#26a69a',downColor:'#ef5350',borderVisible:false,
-    wickUpColor:'#26a69a',wickDownColor:'#ef5350',
+    upColor:'#26a69a',downColor:'#ef5350',borderVisible:false,wickUpColor:'#26a69a',wickDownColor:'#ef5350',
   });
 
   applyPrecision();
@@ -272,9 +257,9 @@ function applyPrecision() {
   candleSeries.applyOptions({priceFormat:pf});
 }
 
-/* ── WebSocket ──────────────────────── */
 function disconnectWs() {
   if (ws) { ws.onclose = null; ws.onerror = null; ws.close(); ws = null; }
+  $status.className = 'err';
 }
 
 function connectBinance(symbol) {
@@ -283,128 +268,62 @@ function connectBinance(symbol) {
   ws = new WebSocket('wss://stream.binance.com:9443/ws/' + stream);
   ws.onopen = () => { $status.className = 'ok'; };
   ws.onmessage = e => {
+    if (dataMode !== 'live') return;
     const m = JSON.parse(e.data);
     if (m.b && m.a) {
-      onTick({
-        symbol: m.s,
-        best_bid: m.b,
-        best_ask: m.a,
-        server_ts: Date.now(),
-        is_crossed: parseFloat(m.b) > parseFloat(m.a),
-      });
+      onTick({ symbol: m.s, best_bid: m.b, best_ask: m.a, server_ts: Date.now() });
     }
   };
   ws.onclose = () => { $status.className = 'err'; };
 }
 
-function switchToSymbol(sym) {
+function onSymbolSelect(sym) {
   currentSymbol = sym;
-  document.getElementById('symbol-select').value = sym;
   resetChartState();
   applyPrecision();
 
-  if (isCrypto(sym)) {
-    loadHistory(sym, currentTfIdx);
-    connectBinance(sym);
-  } else {
-    disconnectWs();
-    $status.className = 'ok';
+  if (dataMode === 'live') {
+    if (isCrypto(sym)) {
+      loadHistory(sym, currentTfIdx);
+      connectBinance(sym);
+    } else {
+      disconnectWs();
+    }
   }
-}
-
-function onSymbolSelect(sym) {
-  switchToSymbol(sym);
 }
 
 function resetChartState() {
   currentCandle = null; currentVolume = null;
-  candleTickCount = 0;
   historyReqId++;
   clearSeries();
-  $bid.textContent = '\u2014';
-  $ask.textContent = '\u2014';
-  $spread.textContent = '\u2014';
-  $tps.textContent = '';
-  $candleTicks.textContent = '';
-  _lastBid = ''; _lastAsk = ''; _lastSp = ''; _lastCrossed = null;
+  if (typeof clearTradeVisuals === 'function') clearTradeVisuals();
+  $bid.textContent = '\u2014'; $ask.textContent = '\u2014'; $spread.textContent = '\u2014';
 }
 
 function onTick(tick) {
-  if (tick.symbol !== currentSymbol) return;
-
-  const bid = parseFloat(tick.best_bid);
-  const ask = parseFloat(tick.best_ask);
-  const mid = (bid + ask) / 2;
-  const ts = tick.server_ts;
-
-  const bt = fmtPrice(bid);
-  const at = fmtPrice(ask);
-  if (bt !== _lastBid) { $bid.textContent = bt; _lastBid = bt; }
-  if (at !== _lastAsk) { $ask.textContent = at; _lastAsk = at; }
-  const sp = ((ask - bid) * cachedInfo.pip).toFixed(1) + spreadUnit();
-  if (sp !== _lastSp) { $spread.textContent = sp; _lastSp = sp; }
-
-  tpsCount++;
-  const now = performance.now();
-  if (now - tpsLast >= 1000) {
-    $tps.textContent = tpsCount + ' t/s';
-    tpsCount = 0; tpsLast = now;
-  }
-
-  if (!isTickMode()) {
-    updateCandleMode(mid, ts);
-  }
+  if (tick.symbol !== currentSymbol || dataMode !== 'live') return;
+  const bid = parseFloat(tick.best_bid), ask = parseFloat(tick.best_ask);
+  $bid.textContent = fmtPrice(bid);
+  $ask.textContent = fmtPrice(ask);
+  $spread.textContent = ((ask - bid) * cachedInfo.pip).toFixed(1);
 }
-
-function updateCandleMode(mid, tsMs) {
-  const ct = candleTimeFor(tsMs);
-  if (!currentCandle || currentCandle.time !== ct) {
-    candleTickCount = 1;
-    currentCandle = {time:ct,open:mid,high:mid,low:mid,close:mid};
-    currentVolume = {time:ct,value:1,color:'#1a3a5c'};
-  } else {
-    currentCandle.high = Math.max(currentCandle.high, mid);
-    currentCandle.low = Math.min(currentCandle.low, mid);
-    currentCandle.close = mid;
-    candleTickCount++;
-    currentVolume.value = candleTickCount;
-  }
-  candleSeries.update(currentCandle);
-  volumeSeries.update(currentVolume);
-  $candleTicks.textContent = candleTickCount + ' ticks';
-}
-
-/* ── Historical Candles (Binance Only) ──────────────────────── */
-const BINANCE_TF_MAP = {
-  1:'1s', 60:'1m', 300:'5m', 900:'15m', 3600:'1h',
-  14400:'4h', 86400:'1d', 604800:'1w', 0xFFFF:'1M',
-};
 
 async function loadHistory(symbol, tfIdx) {
-  if (isTickMode() || !isCrypto(symbol)) return;
+  if (isTickMode() || !isCrypto(symbol) || dataMode !== 'live') return;
   const reqId = ++historyReqId;
-  const sec = TIMEFRAMES[tfIdx].sec;
-
-  const interval = BINANCE_TF_MAP[sec];
+  const BINANCE_TF_MAP = {60:'1m',300:'5m',900:'15m',3600:'1h',14400:'4h',86400:'1d'};
+  const interval = BINANCE_TF_MAP[TIMEFRAMES[tfIdx].sec];
   if (!interval) return;
+
   try {
-    const url = `https://api.binance.com/api/v3/klines?symbol=${symbol}&interval=${interval}&limit=1000`;
-    const res = await fetch(url);
+    const res = await fetch(`https://api.binance.com/api/v3/klines?symbol=${symbol}&interval=${interval}&limit=500`);
     if (!res.ok || reqId !== historyReqId) return;
     const raw = await res.json();
-    if (reqId !== historyReqId) return;
-    const candles = [], vols = [];
-    raw.forEach(k => {
-      const t = Math.floor(k[0]/1000) + JST;
-      candles.push({time:t,open:parseFloat(k[1]),high:parseFloat(k[2]),low:parseFloat(k[3]),close:parseFloat(k[4])});
-      vols.push({time:t,value:Math.round(parseFloat(k[5])*100)/100,color:'#1a3a5c'});
-    });
+    const candles = raw.map(k => ({
+      time: Math.floor(k[0]/1000) + JST, open:parseFloat(k[1]), high:parseFloat(k[2]), low:parseFloat(k[3]), close:parseFloat(k[4])
+    }));
     if (candles.length > 0 && reqId === historyReqId) {
       candleSeries.setData(candles);
-      volumeSeries.setData(vols);
-      currentCandle = {...candles[candles.length-1]};
-      currentVolume = vols[vols.length-1];
-      candleTickCount = 0;
       chart.timeScale().fitContent();
     }
   } catch(e) {}
@@ -420,8 +339,10 @@ async function loadHistory(symbol, tfIdx) {
 
   initUI();
   initChart();
-  loadHistory(currentSymbol, currentTfIdx);
-  connectBinance(currentSymbol);
+  if (isCrypto(currentSymbol)) {
+    loadHistory(currentSymbol, currentTfIdx);
+    connectBinance(currentSymbol);
+  }
 })();
 </script>
 
