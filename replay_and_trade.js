@@ -14,6 +14,8 @@ let paperAccount = {
 };
 
 let tradeLines = [];
+let slPriceLine = null;
+let tpPriceLine = null;
 
 async function loadSelectedRange() {
     const startVal = document.getElementById('startTime').value;
@@ -207,17 +209,60 @@ function placePaperOrder(side) {
         qty: 1
     };
 
+    applySLTP();
     showActiveMarker(currentBar.time, side);
     updateAccountUI(currentBar.price);
 }
 
-function syncInputsToPosition() {
+function applySLTP() {
     if (!paperAccount.position) return;
+
     const slVal = parseFloat(document.getElementById('input-sl').value);
     const tpVal = parseFloat(document.getElementById('input-tp').value);
-    
+
     paperAccount.position.sl = !isNaN(slVal) ? slVal : null;
     paperAccount.position.tp = !isNaN(tpVal) ? tpVal : null;
+
+    renderSltpLines();
+}
+
+function renderSltpLines() {
+    if (typeof candleSeries === 'undefined' || !candleSeries || typeof candleSeries.createPriceLine !== 'function') return;
+
+    if (slPriceLine) {
+        try { candleSeries.removePriceLine(slPriceLine); } catch (e) {}
+        slPriceLine = null;
+    }
+    if (tpPriceLine) {
+        try { candleSeries.removePriceLine(tpPriceLine); } catch (e) {}
+        tpPriceLine = null;
+    }
+
+    if (!paperAccount.position) return;
+
+    const pos = paperAccount.position;
+
+    if (pos.sl !== null) {
+        slPriceLine = candleSeries.createPriceLine({
+            price: pos.sl,
+            color: '#ef5350',
+            lineWidth: 1,
+            lineStyle: 2,
+            axisLabelVisible: true,
+            title: 'SL',
+        });
+    }
+
+    if (pos.tp !== null) {
+        tpPriceLine = candleSeries.createPriceLine({
+            price: pos.tp,
+            color: '#26a69a',
+            lineWidth: 1,
+            lineStyle: 2,
+            axisLabelVisible: true,
+            title: 'TP',
+        });
+    }
 }
 
 function closePaperPosition(reason = 'MANUAL') {
@@ -239,6 +284,8 @@ function closePaperPosition(reason = 'MANUAL') {
 
     paperAccount.balance += pnl;
     paperAccount.position = null;
+
+    renderSltpLines();
     updateAccountUI(currentBar.price);
 }
 
@@ -317,12 +364,12 @@ function clearTradeVisuals() {
         });
     }
     tradeLines = [];
+    renderSltpLines();
 }
 
 function processPaperTrade(bar) {
     if (!paperAccount.position) return;
 
-    syncInputsToPosition();
     const pos = paperAccount.position;
 
     if (pos.side === 'BUY') {
@@ -341,7 +388,7 @@ function processPaperTrade(bar) {
             closePaperPosition('SL');
             return;
         }
-        if (pos.tp !== null && bar.low <= pos.tp) {
+        if (pos.tp !== null && bar.low <= pos.low && pos.tp >= bar.low) {
             closePaperPosition('TP');
             return;
         }

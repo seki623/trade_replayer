@@ -47,6 +47,8 @@ body{background:#0a0a0f;color:#d1d4dc;font-family:'Segoe UI',system-ui,sans-seri
 .replay-ctrl-group{display:flex;align-items:center;gap:4px;background:#10101a;padding:2px 6px;border-radius:4px;border:1px solid #1f1f30}
 .btn-replay{background:#1f1f30;color:#d1d4dc;border:none;padding:3px 8px;font-size:11px;border-radius:3px;cursor:pointer;font-weight:600}
 .btn-replay:hover{background:#2a2a42}
+.btn-apply{background:#2962ff;color:#fff;border:none;padding:3px 8px;font-size:11px;font-weight:bold;border-radius:3px;cursor:pointer}
+.btn-apply:hover{background:#1e50d4}
 .btn-buy{background:#26a69a;color:#fff;border:none;padding:3px 10px;font-size:11px;font-weight:bold;border-radius:3px;cursor:pointer}
 .btn-buy:hover{background:#208b81}
 .btn-sell{background:#ef5350;color:#fff;border:none;padding:3px 10px;font-size:11px;font-weight:bold;border-radius:3px;cursor:pointer}
@@ -101,6 +103,7 @@ body{background:#0a0a0f;color:#d1d4dc;font-family:'Segoe UI',system-ui,sans-seri
     <span style="font-size:10px;color:#26a69a">TP価格:</span>
     <input type="number" id="input-tp" class="sltp-input" placeholder="TP価格" step="0.01">
     
+    <button class="btn-apply" onclick="applySLTP()">SET</button>
     <button class="btn-buy" onclick="placePaperOrder('BUY')">BUY</button>
     <button class="btn-sell" onclick="placePaperOrder('SELL')">SELL</button>
     <button class="btn-close" onclick="closePaperPosition()">CLOSE</button>
