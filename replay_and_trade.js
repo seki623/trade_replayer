@@ -64,6 +64,13 @@ async function loadSelectedRange() {
             candleSeries.setData(historyData.map(d => ({
                 time: d.time, open: d.open, high: d.high, low: d.low, close: d.close
             })));
+            if (typeof volumeSeries !== 'undefined' && volumeSeries) {
+                volumeSeries.setData(historyData.map(d => ({
+                    time: d.time,
+                    value: d.volume,
+                    color: d.close >= d.open ? '#1e4d3b' : '#4d1e24'
+                })));
+            }
             if (typeof chart !== 'undefined' && chart) {
                 chart.timeScale().fitContent();
             }
@@ -154,6 +161,13 @@ function startReplay() {
                 low: bar.low,
                 close: bar.close
             });
+            if (typeof volumeSeries !== 'undefined' && volumeSeries) {
+                volumeSeries.update({
+                    time: bar.time,
+                    value: bar.volume,
+                    color: bar.close >= bar.open ? '#1e4d3b' : '#4d1e24'
+                });
+            }
         }
 
         updatePriceHeader(bar.price);
@@ -183,24 +197,27 @@ function placePaperOrder(side) {
     }
 
     const currentBar = replayQueue[currentIndex - 1];
-    
-    const slVal = parseFloat(document.getElementById('input-sl').value);
-    const tpVal = parseFloat(document.getElementById('input-tp').value);
-    
-    const slPrice = !isNaN(slVal) ? slVal : null;
-    const tpPrice = !isNaN(tpVal) ? tpVal : null;
 
     paperAccount.position = {
         side: side,
         entryPrice: currentBar.price,
         entryTime: currentBar.time,
-        sl: slPrice,
-        tp: tpPrice,
+        sl: null,
+        tp: null,
         qty: 1
     };
 
     showActiveMarker(currentBar.time, side);
     updateAccountUI(currentBar.price);
+}
+
+function syncInputsToPosition() {
+    if (!paperAccount.position) return;
+    const slVal = parseFloat(document.getElementById('input-sl').value);
+    const tpVal = parseFloat(document.getElementById('input-tp').value);
+    
+    paperAccount.position.sl = !isNaN(slVal) ? slVal : null;
+    paperAccount.position.tp = !isNaN(tpVal) ? tpVal : null;
 }
 
 function closePaperPosition(reason = 'MANUAL') {
@@ -232,8 +249,7 @@ function showActiveMarker(time, side) {
         time: time,
         position: side === 'BUY' ? 'belowBar' : 'aboveBar',
         color: side === 'BUY' ? '#26a69a' : '#ef5350',
-        shape: side === 'BUY' ? 'arrowUp' : 'arrowDown',
-        text: side === 'BUY' ? '▲ BUY' : '▼ SELL'
+        text: side === 'BUY' ? '▲' : '▼'
     };
 
     try {
@@ -306,6 +322,7 @@ function clearTradeVisuals() {
 function processPaperTrade(bar) {
     if (!paperAccount.position) return;
 
+    syncInputsToPosition();
     const pos = paperAccount.position;
 
     if (pos.side === 'BUY') {
@@ -322,10 +339,6 @@ function processPaperTrade(bar) {
     if (pos.side === 'SELL') {
         if (pos.sl !== null && bar.high >= pos.sl) {
             closePaperPosition('SL');
-            return;
-        }
-        if (pos.tp !== null && bar.low <= pos.low && pos.sl !== null) { // 安全ガード
-            closePaperPosition('TP');
             return;
         }
         if (pos.tp !== null && bar.low <= pos.tp) {

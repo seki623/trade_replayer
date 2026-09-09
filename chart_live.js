@@ -27,7 +27,7 @@ let reconnectTimer = null;
 let chart = null;
 let candleSeries = null, volumeSeries = null;
 let currentSymbol = 'BTCUSDT';
-let currentTfIdx = 5; // 1m
+let currentTfIdx = 5;
 let dataMode = 'live';
 
 let historyReqId = 0;
@@ -155,7 +155,8 @@ function connectBinance(symbol) {
         const price = parseFloat(m.c);
         const bid = parseFloat(m.b || m.c);
         const ask = parseFloat(m.a || m.c);
-        onLiveTick(m.s, price, bid, ask);
+        const vol = parseFloat(m.v || 0);
+        onLiveTick(m.s, price, bid, ask, vol);
       }
     } catch(err){}
   };
@@ -173,8 +174,9 @@ function connectBinance(symbol) {
 }
 
 let lastBar = null;
+let lastVolBar = null;
 
-function onLiveTick(symbol, price, bid, ask) {
+function onLiveTick(symbol, price, bid, ask, vol) {
   if (symbol !== currentSymbol || dataMode !== 'live') return;
 
   $bid.textContent = fmtPrice(bid);
@@ -188,12 +190,16 @@ function onLiveTick(symbol, price, bid, ask) {
     const barTime = Math.floor(nowSec / tfSec) * tfSec;
     if (!lastBar || lastBar.time !== barTime) {
       lastBar = { time: barTime, open: price, high: price, low: price, close: price };
+      lastVolBar = { time: barTime, value: vol, color: '#1a3a5c' };
     } else {
       lastBar.high = Math.max(lastBar.high, price);
       lastBar.low = Math.min(lastBar.low, price);
+      const isUp = price >= lastBar.open;
       lastBar.close = price;
+      lastVolBar = { time: barTime, value: vol, color: isUp ? '#1e4d3b' : '#4d1e24' };
     }
     candleSeries.update(lastBar);
+    if (volumeSeries) volumeSeries.update(lastVolBar);
   }
 }
 
@@ -214,6 +220,7 @@ function onSymbolSelect(sym) {
 
 function resetChartState() {
   lastBar = null;
+  lastVolBar = null;
   historyReqId++;
   clearSeries();
   if (typeof clearTradeVisuals === 'function') clearTradeVisuals();
@@ -231,11 +238,20 @@ async function loadHistory(symbol, tfIdx) {
     const res = await fetch(`https://api.binance.com/api/v3/klines?symbol=${symbol}&interval=${interval}&limit=500`);
     if (!res.ok || reqId !== historyReqId) return;
     const raw = await res.json();
-    const candles = raw.map(k => ({
-      time: Math.floor(k[0]/1000) + JST, open:parseFloat(k[1]), high:parseFloat(k[2]), low:parseFloat(k[3]), close:parseFloat(k[4])
-    }));
+    const candles = [];
+    const vols = [];
+
+    raw.forEach(k => {
+      const time = Math.floor(k[0]/1000) + JST;
+      const open = parseFloat(k[1]);
+      const close = parseFloat(k[4]);
+      candles.push({ time, open, high: parseFloat(k[2]), low: parseFloat(k[3]), close });
+      vols.push({ time, value: parseFloat(k[5]), color: close >= open ? '#1e4d3b' : '#4d1e24' });
+    });
+
     if (candles.length > 0 && reqId === historyReqId) {
       candleSeries.setData(candles);
+      if (volumeSeries) volumeSeries.setData(vols);
       chart.timeScale().fitContent();
     }
   } catch(e) {}
