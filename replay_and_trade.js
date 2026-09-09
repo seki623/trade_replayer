@@ -102,37 +102,57 @@ function parseCSV(text) {
     const lines = text.trim().split('\n');
     allRawData = [];
 
-    for (let i = 0; i < lines.length; i++) {
+    // ヘッダー行があるか確認（1パターン目対策）
+    let startLine = 0;
+    if (lines[0].includes('Price') || lines[0].includes('Datetime') || lines[0].includes('Ticker')) {
+        // ヘッダー行をスキップ
+        while (startLine < lines.length && (
+            lines[startLine].includes('Price') || 
+            lines[startLine].includes('Ticker') || 
+            lines[startLine].includes('Datetime')
+        )) {
+            startLine++;
+        }
+    }
+
+    for (let i = startLine; i < lines.length; i++) {
         const line = lines[i].trim();
         if (!line) continue;
         const cols = line.split(/[,;\t]+/);
         if (cols.length < 5) continue;
 
         let unixSec = null;
-        let oIdx = 1, hIdx = 2, lIdx = 3, cIdx = 4, vIdx = 5;
+        let open = 0, high = 0, low = 0, close = 0, volume = 0;
 
+        // パターン2: 日付と時間が分かれている場合 (例: 2026.01.02, 08:00, Open, High, Low, Close, Volume)
         if (cols[0].length <= 10 && cols[1] && cols[1].includes(':')) {
             unixSec = parseDateTimeToUnix(cols[0], cols[1]);
-            oIdx = 2; hIdx = 3; lIdx = 4; cIdx = 5; vIdx = 6;
-        } else {
+            open  = parseFloat(cols[2]);
+            high  = parseFloat(cols[3]);
+            low   = parseFloat(cols[4]);
+            close = parseFloat(cols[5]);
+            volume = cols[6] ? parseFloat(cols[6]) : 0;
+        } 
+        // パターン1: 1列目に日時がまとまっている場合 (例: 2026-09-01 00:00:00-04:00, Close, High, Low, Open, Volume)
+        else {
             unixSec = parseDateTimeToUnix(cols[0]);
-            oIdx = 1; hIdx = 2; lIdx = 3; cIdx = 4; vIdx = 5;
+            // Yahoo形式（1パターン目）のカラム順: Close, High, Low, Open, Volume
+            close  = parseFloat(cols[1]);
+            high   = parseFloat(cols[2]);
+            low    = parseFloat(cols[3]);
+            open   = parseFloat(cols[4]);
+            volume = cols[5] ? parseFloat(cols[5]) : 0;
         }
 
-        const open = parseFloat(cols[oIdx]);
-        const high = parseFloat(cols[hIdx]);
-        const low = parseFloat(cols[lIdx]);
-        const close = parseFloat(cols[cIdx]);
-
-        if (unixSec && !isNaN(close)) {
+        if (unixSec && !isNaN(close) && !isNaN(open)) {
             allRawData.push({
                 time: unixSec,
-                open: isNaN(open) ? close : open,
-                high: isNaN(high) ? close : high,
-                low: isNaN(low) ? close : low,
+                open: open,
+                high: high,
+                low: low,
                 close: close,
                 price: close,
-                volume: cols[vIdx] ? parseFloat(cols[vIdx]) : 0
+                volume: volume
             });
         }
     }
@@ -423,3 +443,6 @@ function updateAccountUI(currentPrice) {
         $pnl.className = 'pnl-val ' + (unrealizedPnl >= 0 ? 'pnl-plus' : 'pnl-minus');
     }
 }
+
+
+
