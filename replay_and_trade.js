@@ -1,12 +1,12 @@
 // ==========================================
-// TickForge 連携版: 期間指定ステップ描画リプレイ
+// TickForge: GitHub Pages対応 期間指定リプレイ
 // ==========================================
 
 let allRawData = [];       // CSVから解析した全データ
 let replayQueue = [];      // 開始〜終了期間中に1足ずつ追加していくデータ
 let currentIndex = 0;
 let replayTimer = null;
-let replaySpeed = 500; // ms
+let replaySpeed = 500;     // ms
 
 let paperAccount = {
     balance: 1000000,
@@ -31,7 +31,7 @@ async function loadSelectedRange() {
         return;
     }
 
-    // 開始日時の年月から該当するCSVファイルパスを特定 (例: XAUUSD/2025-07.csv)
+    // GitHub Pages上の相対パスを取得 (例: ./XAUUSD/2025-07.csv)
     const startDate = new Date(startVal);
     const yyyy = startDate.getFullYear();
     const mm = String(startDate.getMonth() + 1).padStart(2, '0');
@@ -41,7 +41,9 @@ async function loadSelectedRange() {
 
     try {
         const response = await fetch(filePath);
-        if (!response.ok) throw new Error("ファイルが見つかりません: " + filePath);
+        if (!response.ok) {
+            throw new Error(`ファイルが見つかりません: ${filePath}\nGitHubリポジトリ内にファイルが配置されているかご確認ください。`);
+        }
         const text = await response.text();
         
         parseCSV(text);
@@ -52,7 +54,7 @@ async function loadSelectedRange() {
         replayQueue = allRawData.filter(d => d.time >= startTs && d.time <= endTs);
 
         if (replayQueue.length === 0) {
-            alert("指定された期間のデータが見つかりませんでした。");
+            alert("指定された期間のデータがCSV内に見つかりませんでした。");
             return;
         }
 
@@ -71,7 +73,7 @@ async function loadSelectedRange() {
 
     } catch (err) {
         console.error("ロードエラー:", err);
-        alert(`データの読み込みに失敗しました:\n${filePath}`);
+        alert(`データの読み込みに失敗しました:\n${err.message}`);
     }
 }
 
@@ -146,7 +148,6 @@ function startReplay() {
 
         const bar = replayQueue[currentIndex];
 
-        // 1足ずつ動的に追加・更新
         if (typeof candleSeries !== 'undefined' && candleSeries) {
             candleSeries.update({
                 time: bar.time,
