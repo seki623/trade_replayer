@@ -172,6 +172,7 @@ function changeReplaySpeed(val) {
     if (replayTimer) startReplay();
 }
 
+// 注文処理（入力された価格をそのまま指値価格として使用）
 function placePaperOrder(side) {
     if (paperAccount.position) {
         alert("すでにポジションを保有しています。");
@@ -184,6 +185,7 @@ function placePaperOrder(side) {
 
     const currentBar = replayQueue[currentIndex - 1];
     
+    // 入力欄の「価格数値」をそのままSL/TP価格として取得
     const slVal = parseFloat(document.getElementById('input-sl').value);
     const tpVal = parseFloat(document.getElementById('input-tp').value);
     
