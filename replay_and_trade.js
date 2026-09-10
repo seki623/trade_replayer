@@ -7,6 +7,7 @@ let replayQueue = [];
 let currentIndex = 0;
 let replayTimer = null;
 let replaySpeed = 500;
+let startReplayTs = null;
 
 let paperAccount = {
     balance: 1000000,
@@ -54,6 +55,7 @@ async function loadSelectedRange() {
         
         parseCSV(text);
 
+        startReplayTs = startTs;
         const historyData = allRawData.filter(d => d.time < startTs);
         replayQueue = allRawData.filter(d => d.time >= startTs && d.time <= endTs);
 
@@ -73,6 +75,7 @@ async function loadSelectedRange() {
                     color: d.close >= d.open ? '#1e4d3b' : '#4d1e24'
                 })));
             }
+            if (typeof renderCheesecake2 === 'function') renderCheesecake2(historyData);
             if (typeof chart !== 'undefined' && chart) {
                 chart.timeScale().fitContent();
             }
@@ -190,6 +193,13 @@ function startReplay() {
                     color: bar.close >= bar.open ? '#1e4d3b' : '#4d1e24'
                 });
             }
+        }
+
+        // Rebuild the indicator from only the data visible at the current replay point.
+        if (typeof renderCheesecake2 === 'function') {
+            const visibleReplayData = replayQueue.slice(0, currentIndex + 1);
+            const background = allRawData.filter(d => d.time < startReplayTs);
+            renderCheesecake2(background.concat(visibleReplayData));
         }
 
         updatePriceHeader(bar.price);
@@ -442,12 +452,4 @@ function updateAccountUI(currentPrice) {
         $pnl.textContent = Math.round(unrealizedPnl).toLocaleString();
         $pnl.className = 'pnl-val ' + (unrealizedPnl >= 0 ? 'pnl-plus' : 'pnl-minus');
     }
-}
-
-// cheesecake2 integration hook.
-// Call this from any replay/live update path that has the visible candle array.
-function refreshCheesecake2ForCandles(candles) {
-  if (window.renderCheesecake2 && Array.isArray(candles)) {
-    window.renderCheesecake2(candles);
-  }
 }
