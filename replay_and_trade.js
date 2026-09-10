@@ -1,5 +1,5 @@
 // ==========================================
-// TickForge: リプレイ & ペパートレード制御 script
+// TickForge: リプレイ & ペーパートレード制御 script
 // ==========================================
 
 let allRawData = [];
@@ -7,7 +7,6 @@ let replayQueue = [];
 let currentIndex = 0;
 let replayTimer = null;
 let replaySpeed = 500;
-let startReplayTs = null;
 
 let paperAccount = {
     balance: 1000000,
@@ -38,24 +37,35 @@ async function loadSelectedRange() {
     const symbolSelectEl = document.getElementById('symbol-select');
     const symbol = symbolSelectEl ? symbolSelectEl.value : 'XAUUSD';
 
-    const startDate = new Date(startVal);
-    const yyyy = startDate.getFullYear();
-    const mm = String(startDate.getMonth() + 1).padStart(2, '0');
-    const filePath = `./${symbol}/${yyyy}-${mm}.csv`;
-
     pauseReplay();
     clearTradeVisuals();
 
     try {
-        const response = await fetch(filePath);
-        if (!response.ok) {
-            throw new Error(`【${symbol}】のCSVデータが見つかりません:\n${filePath}`);
-        }
-        const text = await response.text();
-        
-        parseCSV(text);
+        // 開始月の1か月前から終了月まで読む。
+        // これにより月初でもPDO/PWO等の直前期間を取得できる。
+        const firstMonth = new Date(new Date(startVal).getFullYear(), new Date(startVal).getMonth() - 1, 1);
+        const lastMonth = new Date(new Date(endVal).getFullYear(), new Date(endVal).getMonth(), 1);
 
-        startReplayTs = startTs;
+        const texts = [];
+        for (let d = new Date(firstMonth); d <= lastMonth; d.setMonth(d.getMonth() + 1)) {
+            const yyyy = d.getFullYear();
+            const mm = String(d.getMonth() + 1).padStart(2, '0');
+            const filePath = `./${symbol}/${yyyy}-${mm}.csv`;
+            const response = await fetch(filePath);
+            if (response.ok) {
+                texts.push(await response.text());
+            } else if (d.getTime() >= new Date(new Date(startVal).getFullYear(), new Date(startVal).getMonth(), 1).getTime()) {
+                throw new Error(`【${symbol}】のCSVデータが見つかりません:\n${filePath}`);
+            }
+        }
+
+        allRawData = [];
+        for (const text of texts) {
+            const parsed = parseCSVText(text);
+            allRawData.push(...parsed);
+        }
+        allRawData.sort((a, b) => a.time - b.time);
+
         const historyData = allRawData.filter(d => d.time < startTs);
         replayQueue = allRawData.filter(d => d.time >= startTs && d.time <= endTs);
 
@@ -75,13 +85,21 @@ async function loadSelectedRange() {
                     color: d.close >= d.open ? '#1e4d3b' : '#4d1e24'
                 })));
             }
-            if (typeof renderCheesecake2 === 'function') renderCheesecake2(historyData);
             if (typeof chart !== 'undefined' && chart) {
                 chart.timeScale().fitContent();
             }
         }
 
         currentIndex = 0;
+
+        // cheesecake2を「リプレイ開始時点」まで描画
+        if (typeof cheesecake2Reset === 'function') {
+            cheesecake2Reset();
+        }
+        if (typeof cheesecake2Render === 'function') {
+            cheesecake2Render(historyData, null);
+        }
+
         alert(`【${symbol} ロード完了】\n過去背景データ: ${historyData.length}本\nリプレイ再生対象: ${replayQueue.length}本`);
 
     } catch (err) {
@@ -101,17 +119,15 @@ function parseDateTimeToUnix(dateStr, timeStr) {
     return null;
 }
 
-function parseCSV(text) {
+function parseCSVText(text) {
     const lines = text.trim().split('\n');
-    allRawData = [];
+    const result = [];
 
-    // ヘッダー行があるか確認（1パターン目対策）
     let startLine = 0;
-    if (lines[0].includes('Price') || lines[0].includes('Datetime') || lines[0].includes('Ticker')) {
-        // ヘッダー行をスキップ
+    if (lines.length && (lines[0].includes('Price') || lines[0].includes('Datetime') || lines[0].includes('Ticker'))) {
         while (startLine < lines.length && (
-            lines[startLine].includes('Price') || 
-            lines[startLine].includes('Ticker') || 
+            lines[startLine].includes('Price') ||
+            lines[startLine].includes('Ticker') ||
             lines[startLine].includes('Datetime')
         )) {
             startLine++;
@@ -127,7 +143,6 @@ function parseCSV(text) {
         let unixSec = null;
         let open = 0, high = 0, low = 0, close = 0, volume = 0;
 
-        // パターン2: 日付と時間が分かれている場合 (例: 2026.01.02, 08:00, Open, High, Low, Close, Volume)
         if (cols[0].length <= 10 && cols[1] && cols[1].includes(':')) {
             unixSec = parseDateTimeToUnix(cols[0], cols[1]);
             open  = parseFloat(cols[2]);
@@ -135,11 +150,8 @@ function parseCSV(text) {
             low   = parseFloat(cols[4]);
             close = parseFloat(cols[5]);
             volume = cols[6] ? parseFloat(cols[6]) : 0;
-        } 
-        // パターン1: 1列目に日時がまとまっている場合 (例: 2026-09-01 00:00:00-04:00, Close, High, Low, Open, Volume)
-        else {
+        } else {
             unixSec = parseDateTimeToUnix(cols[0]);
-            // Yahoo形式（1パターン目）のカラム順: Close, High, Low, Open, Volume
             close  = parseFloat(cols[1]);
             high   = parseFloat(cols[2]);
             low    = parseFloat(cols[3]);
@@ -148,7 +160,7 @@ function parseCSV(text) {
         }
 
         if (unixSec && !isNaN(close) && !isNaN(open)) {
-            allRawData.push({
+            result.push({
                 time: unixSec,
                 open: open,
                 high: high,
@@ -159,6 +171,11 @@ function parseCSV(text) {
             });
         }
     }
+    return result;
+}
+
+function parseCSV(text) {
+    allRawData = parseCSVText(text);
     allRawData.sort((a, b) => a.time - b.time);
 }
 
@@ -172,6 +189,7 @@ function startReplay() {
     replayTimer = setInterval(() => {
         if (currentIndex >= replayQueue.length) {
             clearInterval(replayTimer);
+            replayTimer = null;
             alert("リプレイが終了しました。");
             return;
         }
@@ -195,22 +213,25 @@ function startReplay() {
             }
         }
 
-        // Rebuild the indicator from only the data visible at the current replay point.
-        if (typeof renderCheesecake2 === 'function') {
-            const visibleReplayData = replayQueue.slice(0, currentIndex + 1);
-            const background = allRawData.filter(d => d.time < startReplayTs);
-            renderCheesecake2(background.concat(visibleReplayData));
-        }
-
         updatePriceHeader(bar.price);
         processPaperTrade(bar);
 
         currentIndex++;
+
+        // ここがcheesecake2のリプレイ同期点。
+        // currentIndexまでが「既知の未来なし」データ。
+        if (typeof cheesecake2Render === 'function') {
+            cheesecake2Render(allRawData.filter(d => d.time < bar.time).concat([bar]), bar.time);
+        }
+
     }, replaySpeed);
 }
 
 function pauseReplay() {
-    if (replayTimer) clearInterval(replayTimer);
+    if (replayTimer) {
+        clearInterval(replayTimer);
+        replayTimer = null;
+    }
 }
 
 function changeReplaySpeed(val) {
@@ -299,14 +320,16 @@ function closePaperPosition(reason = 'MANUAL') {
     if (!paperAccount.position) return;
 
     const currentBar = replayQueue[currentIndex - 1];
+    if (!currentBar) return;
+
     const pos = paperAccount.position;
 
     let exitPrice = currentBar.price;
     if (reason === 'SL' && pos.sl !== null) exitPrice = pos.sl;
     if (reason === 'TP' && pos.tp !== null) exitPrice = pos.tp;
 
-    let pnl = (pos.side === 'BUY') 
-        ? (exitPrice - pos.entryPrice) * pos.qty 
+    let pnl = (pos.side === 'BUY')
+        ? (exitPrice - pos.entryPrice) * pos.qty
         : (pos.entryPrice - exitPrice) * pos.qty;
 
     clearMarkers();
@@ -418,7 +441,7 @@ function processPaperTrade(bar) {
             closePaperPosition('SL');
             return;
         }
-        if (pos.tp !== null && bar.low <= pos.low && pos.tp >= bar.low) {
+        if (pos.tp !== null && bar.low <= pos.tp) {
             closePaperPosition('TP');
             return;
         }

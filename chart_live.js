@@ -252,7 +252,6 @@ async function loadHistory(symbol, tfIdx) {
     if (candles.length > 0 && reqId === historyReqId) {
       candleSeries.setData(candles);
       if (volumeSeries) volumeSeries.setData(vols);
-      if (typeof renderCheesecake2 === 'function') renderCheesecake2(candles);
       chart.timeScale().fitContent();
     }
   } catch(e) {}
