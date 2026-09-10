@@ -443,3 +443,11 @@ function updateAccountUI(currentPrice) {
         $pnl.className = 'pnl-val ' + (unrealizedPnl >= 0 ? 'pnl-plus' : 'pnl-minus');
     }
 }
+
+// cheesecake2 integration hook.
+// Call this from any replay/live update path that has the visible candle array.
+function refreshCheesecake2ForCandles(candles) {
+  if (window.renderCheesecake2 && Array.isArray(candles)) {
+    window.renderCheesecake2(candles);
+  }
+}
