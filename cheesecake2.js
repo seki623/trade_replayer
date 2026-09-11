@@ -1,9 +1,27 @@
 // ==========================================
 // TickForge cheesecake2
-// Pine版 cheesecake2 の主要ラインをリプレイデータへ同期
-// + Daily VWAP / VWAP ±2σ
+// Pine版 cheesecake2 の主要ライン + Daily VWAP
+//
+// Daily VWAP:
+//   日本時間07:00を日次リセット基準とする。
+//   XMサーバー時間:
+//     夏時間 = JST - 6時間 → 01:00開始
+//     冬時間 = JST - 7時間 → 00:00開始
+//
+// VWAP:
+//   Σ(price × volume) / Σ(volume)
+//   price = (High + Low + Close) / 3
+//
+// VWAP ± 2σ:
+//   volume加重標準偏差
+//
+// リプレイ:
+//   現在時点までのデータのみを使用。
+//   将来データは使用しない。
 // ==========================================
+
 (function () {
+
   const MAX_DAYS = 40;
   const MAX_WEEKS = 20;
   const MAX_MONTHS = 12;
@@ -14,17 +32,37 @@
     L: '#ef5350',
     C: '#ffff00',
     ATR: '#ff00ff',
+
     VWAP: '#ffffff',
-    VWAP_UPPER: '#ffffff',
-    VWAP_LOWER: '#ffffff'
+    VWAP_UPPER: '#aaaaaa',
+    VWAP_LOWER: '#aaaaaa'
   };
 
-  let groups = { day: [], week: [], month: [], vwap: [] };
-  let current = { day: [], week: [], month: [], vwap: [] };
+  const VWAP_SIGMA = 2;
+
+  let groups = {
+    day: [],
+    week: [],
+    month: [],
+    vwap: []
+  };
+
+  let current = {
+    day: [],
+    week: [],
+    month: [],
+    vwap: []
+  };
+
   let initialized = false;
 
+  // ------------------------------------------
+  // 基本
+  // ------------------------------------------
+
   function validBar(b) {
-    return b && Number.isFinite(b.time) &&
+    return b &&
+      Number.isFinite(b.time) &&
       Number.isFinite(b.open) &&
       Number.isFinite(b.high) &&
       Number.isFinite(b.low) &&
@@ -33,45 +71,54 @@
 
   function keyDay(ts) {
     const d = new Date(ts * 1000);
-    return `${d.getFullYear()}-${d.getMonth()+1}-${d.getDate()}`;
+    return `${d.getFullYear()}-${d.getMonth() + 1}-${d.getDate()}`;
   }
 
   function dayStart(ts) {
     const d = new Date(ts * 1000);
-    d.setHours(0,0,0,0);
-    return Math.floor(d.getTime()/1000);
+    d.setHours(0, 0, 0, 0);
+    return Math.floor(d.getTime() / 1000);
   }
 
   function weekStart(ts) {
     const d = new Date(ts * 1000);
-    d.setHours(0,0,0,0);
+    d.setHours(0, 0, 0, 0);
 
     const day = d.getDay();
     const diff = day === 0 ? 6 : day - 1;
 
     d.setDate(d.getDate() - diff);
 
-    return Math.floor(d.getTime()/1000);
+    return Math.floor(d.getTime() / 1000);
   }
 
   function monthStart(ts) {
     const d = new Date(ts * 1000);
-    d.setDate(1);
-    d.setHours(0,0,0,0);
 
-    return Math.floor(d.getTime()/1000);
+    d.setDate(1);
+    d.setHours(0, 0, 0, 0);
+
+    return Math.floor(d.getTime() / 1000);
   }
 
+  // ------------------------------------------
+  // 期間集計
+  // ------------------------------------------
+
   function buildPeriods(data, startFn, limit) {
+
     const map = new Map();
 
     for (const b of data) {
+
       if (!validBar(b)) continue;
 
       const k = startFn(b.time);
+
       let p = map.get(k);
 
       if (!p) {
+
         p = {
           start: k,
           end: b.time,
@@ -82,20 +129,28 @@
         };
 
         map.set(k, p);
+
       } else {
+
         p.end = b.time;
         p.h = Math.max(p.h, b.high);
         p.l = Math.min(p.l, b.low);
         p.c = b.close;
+
       }
     }
 
     return Array.from(map.values())
-      .sort((a,b) => a.start - b.start)
+      .sort((a, b) => a.start - b.start)
       .slice(-limit);
   }
 
+  // ------------------------------------------
+  // ATR
+  // ------------------------------------------
+
   function tr(cur, prevClose) {
+
     if (!Number.isFinite(prevClose)) {
       return cur.h - cur.l;
     }
@@ -107,32 +162,37 @@
     );
   }
 
-  // ------------------------------------------
-  // ATR
-  // ------------------------------------------
-  // ta.atr(5) に対応する Wilder RMA。
-  // 当日についてはリプレイ時点までのH/L/Cで更新。
+  // ta.atr(5) 相当
   function atrSeries(days) {
+
     if (!days.length) return [];
 
     const out = [];
+
     let atr = NaN;
     let sum = 0;
     let count = 0;
 
     for (let i = 0; i < days.length; i++) {
-      const prevC = i > 0 ? days[i - 1].c : NaN;
+
+      const prevC =
+        i > 0 ? days[i - 1].c : NaN;
+
       const value = tr(days[i], prevC);
 
       if (!Number.isFinite(atr)) {
+
         sum += value;
         count++;
 
         if (count >= 5) {
           atr = sum / 5;
         }
+
       } else {
+
         atr = (atr * 4 + value) / 5;
+
       }
 
       out.push(atr);
@@ -144,19 +204,24 @@
   // ------------------------------------------
   // Series削除
   // ------------------------------------------
+
   function clearSeriesArray(arr) {
+
     if (!chart) return;
 
-    for (const s of arr) {
+    for (const item of arr) {
+
       try {
-        chart.removeSeries(s.series);
-      } catch(e) {}
+        chart.removeSeries(item.series);
+      } catch (e) {}
+
     }
 
     arr.length = 0;
   }
 
   function resetGroups() {
+
     clearSeriesArray(groups.day);
     clearSeriesArray(groups.week);
     clearSeriesArray(groups.month);
@@ -185,8 +250,9 @@
   }
 
   // ------------------------------------------
-  // 水平ライン作成
+  // 水平ライン
   // ------------------------------------------
+
   function makeLine(
     startTime,
     endTime,
@@ -196,6 +262,7 @@
     arr,
     dotted = false
   ) {
+
     if (
       !chart ||
       !Number.isFinite(price) ||
@@ -212,7 +279,12 @@
     let s = null;
 
     try {
-      if (LightweightCharts.LineSeries && chart.addSeries) {
+
+      if (
+        LightweightCharts.LineSeries &&
+        chart.addSeries
+      ) {
+
         s = chart.addSeries(
           LightweightCharts.LineSeries,
           {
@@ -225,7 +297,9 @@
             visible: true
           }
         );
+
       } else if (chart.addLineSeries) {
+
         s = chart.addLineSeries({
           color,
           lineWidth: 1,
@@ -234,15 +308,23 @@
           priceLineVisible: false,
           lastValueVisible: false
         });
+
       }
-    } catch(e) {
-      console.error('cheesecake2 line creation error', e);
+
+    } catch (e) {
+
+      console.error(
+        'cheesecake2 line creation error',
+        e
+      );
+
       return;
     }
 
     if (!s) return;
 
     try {
+
       s.setData([
         {
           time: startTime,
@@ -254,19 +336,28 @@
         }
       ]);
 
-      if (LightweightCharts.createSeriesMarkers) {
-        LightweightCharts.createSeriesMarkers(s, [{
-          time: endTime,
-          position: 'inBar',
-          shape: 'circle',
-          color,
-          text: title
-        }]);
+      if (
+        LightweightCharts.createSeriesMarkers
+      ) {
+
+        LightweightCharts.createSeriesMarkers(
+          s,
+          [{
+            time: endTime,
+            position: 'inBar',
+            shape: 'circle',
+            color,
+            text: title
+          }]
+        );
+
       }
-    } catch(e) {
+
+    } catch (e) {
+
       try {
         chart.removeSeries(s);
-      } catch(_) {}
+      } catch (_) {}
 
       return;
     }
@@ -278,10 +369,13 @@
   }
 
   // ------------------------------------------
-  // 過去期間OHLC
+  // D/W/M
   // ------------------------------------------
+
   function drawHistory(periods, arr, prefix) {
+
     for (let i = 1; i < periods.length; i++) {
+
       const prev = periods[i - 1];
       const cur = periods[i];
 
@@ -325,10 +419,12 @@
     }
   }
 
-  // ------------------------------------------
-  // 現在期間OHLC
-  // ------------------------------------------
-  function drawCurrentPeriod(period, prefix, arr) {
+  function drawCurrentPeriod(
+    period,
+    prefix,
+    arr
+  ) {
+
     if (!period) return;
 
     makeLine(
@@ -362,7 +458,14 @@
   // ------------------------------------------
   // ATR
   // ------------------------------------------
-  function drawATR(data, days, atrs, arr) {
+
+  function drawATR(
+    data,
+    days,
+    atrs,
+    arr
+  ) {
+
     if (!days.length) return;
 
     const i = days.length - 1;
@@ -411,7 +514,11 @@
       true
     );
 
-    if (i >= 1 && Number.isFinite(atrs[i - 1])) {
+    if (
+      i >= 1 &&
+      Number.isFinite(atrs[i - 1])
+    ) {
+
       const p = days[i - 1];
       const a = atrs[i - 1];
 
@@ -456,7 +563,11 @@
       );
     }
 
-    if (i >= 2 && Number.isFinite(atrs[i - 2])) {
+    if (
+      i >= 2 &&
+      Number.isFinite(atrs[i - 2])
+    ) {
+
       const p = days[i - 2];
       const a = atrs[i - 2];
 
@@ -503,285 +614,439 @@
   }
 
   // ==========================================
-  // Daily VWAP + 2σ
+  // Daily VWAP
   // ==========================================
-  //
-  // 価格:
-  //   HLC3 = (High + Low + Close) / 3
-  //
-  // VWAP:
-  //   Σ(HLC3 × Volume) / ΣVolume
-  //
-  // σ:
-  //   Volume加重分散から算出
-  //
-  //   variance =
-  //   Σ(Volume × (HLC3 - VWAP)^2) / ΣVolume
-  //
-  // Upper = VWAP + 2σ
-  // Lower = VWAP - 2σ
-  //
-  // Daily開始時に累積値をリセット。
-  // リプレイでは渡されたデータ時点までしか使用しない。
-  //
-  function buildDailyVWAP(data) {
-    if (!Array.isArray(data) || !data.length) {
-      return [];
+
+  /*
+   * XM時間から日本時間07:00の境界を作る。
+   *
+   * XM夏時間:
+   *   JST = XM + 6
+   *   JST 07:00 = XM 01:00
+   *
+   * XM冬時間:
+   *   JST = XM + 7
+   *   JST 07:00 = XM 00:00
+   *
+   * ここではCSVに入っている時刻を
+   * 「XMサーバー時間」として扱う。
+   */
+
+  function isLastSunday(year, month, date) {
+
+    const d = new Date(
+      year,
+      month,
+      date
+    );
+
+    return d.getDay() === 0 &&
+      date + 7 >
+        new Date(
+          year,
+          month + 1,
+          0
+        ).getDate();
+  }
+
+  function isXMSummerTime(ts) {
+
+    const d = new Date(ts * 1000);
+
+    const year = d.getFullYear();
+
+    // 3月最終日曜日
+    let marchLastSunday = 31;
+
+    while (
+      !isLastSunday(
+        year,
+        2,
+        marchLastSunday
+      )
+    ) {
+      marchLastSunday--;
     }
 
-    const result = [];
+    // 10月最終日曜日
+    let octoberLastSunday = 31;
 
-    let currentDay = null;
+    while (
+      !isLastSunday(
+        year,
+        9,
+        octoberLastSunday
+      )
+    ) {
+      octoberLastSunday--;
+    }
 
-    let sumPV = 0;
-    let sumVolume = 0;
-    let sumPV2 = 0;
+    const summerStart = new Date(
+      year,
+      2,
+      marchLastSunday,
+      0,
+      0,
+      0
+    ).getTime() / 1000;
+
+    const summerEnd = new Date(
+      year,
+      9,
+      octoberLastSunday,
+      0,
+      0,
+      0
+    ).getTime() / 1000;
+
+    return ts >= summerStart &&
+      ts < summerEnd;
+  }
+
+  function getVWAPSessionStart(ts) {
+
+    const d = new Date(ts * 1000);
+
+    const offset =
+      isXMSummerTime(ts)
+        ? 6
+        : 7;
+
+    // XM時間での日本時間07:00
+    const xmStartHour =
+      7 - offset;
+
+    const session = new Date(
+      d.getFullYear(),
+      d.getMonth(),
+      d.getDate(),
+      xmStartHour,
+      0,
+      0,
+      0
+    );
+
+    /*
+     * 現在時刻が07:00境界より前なら
+     * 前日のセッションに所属。
+     */
+    if (d.getTime() < session.getTime()) {
+      session.setDate(
+        session.getDate() - 1
+      );
+    }
+
+    return Math.floor(
+      session.getTime() / 1000
+    );
+  }
+
+  // ------------------------------------------
+  // VWAP本体
+  // ------------------------------------------
+
+  function buildDailyVWAP(data) {
+
+    if (!data.length) return [];
+
+    const sessions = new Map();
 
     for (const b of data) {
+
       if (!validBar(b)) continue;
 
-      const dStart = dayStart(b.time);
+      const sessionStart =
+        getVWAPSessionStart(b.time);
 
-      if (currentDay === null || currentDay !== dStart) {
-        currentDay = dStart;
-
-        sumPV = 0;
-        sumVolume = 0;
-        sumPV2 = 0;
-      }
-
-      const volume = Number.isFinite(b.volume) && b.volume > 0
-        ? b.volume
-        : 0;
-
-      const hlc3 = (
-        b.high +
-        b.low +
-        b.close
-      ) / 3;
-
-      if (volume > 0) {
-        sumPV += hlc3 * volume;
-        sumVolume += volume;
-
-        sumPV2 += hlc3 * hlc3 * volume;
-      }
-
-      if (sumVolume <= 0) {
-        continue;
-      }
-
-      const vwap = sumPV / sumVolume;
-
-      const variance =
-        (sumPV2 / sumVolume) -
-        (vwap * vwap);
-
-      const sigma = Math.sqrt(
-        Math.max(0, variance)
+      let s = sessions.get(
+        sessionStart
       );
 
-      result.push({
-        time: b.time,
-        vwap: vwap,
-        upper: vwap + sigma * 2,
-        lower: vwap - sigma * 2,
-        dayStart: currentDay
-      });
+      if (!s) {
+
+        s = {
+          start: sessionStart,
+          bars: []
+        };
+
+        sessions.set(
+          sessionStart,
+          s
+        );
+      }
+
+      s.bars.push(b);
     }
 
-    return result;
-  }
+    const output = [];
 
-  // ------------------------------------------
-  // VWAPを動的ラインとして描画
-  // ------------------------------------------
-  function drawDailyVWAP(data, arr) {
-    const values = buildDailyVWAP(data);
+    const sortedSessions =
+      Array.from(
+        sessions.values()
+      ).sort(
+        (a, b) => a.start - b.start
+      );
 
-    if (!values.length) return;
+    for (const session of sortedSessions) {
 
-    // 日ごとにラインを分ける
-    let segment = [];
-    let segmentDay = null;
+      let sumPV = 0;
+      let sumV = 0;
+      let sumPV2 = 0;
 
-    function drawSegment(seg) {
-      if (seg.length < 2) return;
+      for (const b of session.bars) {
 
-      const start = seg[0].time;
-      const end = seg[seg.length - 1].time;
+        /*
+         * TradingView VWAPで一般的に使われる
+         * Typical Price:
+         *
+         * (H + L + C) / 3
+         */
+        const price =
+          (b.high + b.low + b.close) / 3;
 
-      let vwapSeries = null;
-      let upperSeries = null;
-      let lowerSeries = null;
+        /*
+         * Volume
+         */
+        const volume =
+          Number.isFinite(b.volume) &&
+          b.volume > 0
+            ? b.volume
+            : 0;
 
-      try {
-        if (LightweightCharts.LineSeries && chart.addSeries) {
-          vwapSeries = chart.addSeries(
-            LightweightCharts.LineSeries,
-            {
-              color: COLORS.VWAP,
-              lineWidth: 1,
-              lineStyle: 0,
-              crosshairMarkerVisible: false,
-              priceLineVisible: false,
-              lastValueVisible: false
-            }
-          );
+        /*
+         * Volumeが0の場合は
+         * VWAP計算へ入れない。
+         */
+        if (volume <= 0) continue;
 
-          upperSeries = chart.addSeries(
-            LightweightCharts.LineSeries,
-            {
-              color: COLORS.VWAP_UPPER,
-              lineWidth: 1,
-              lineStyle: 2,
-              crosshairMarkerVisible: false,
-              priceLineVisible: false,
-              lastValueVisible: false
-            }
-          );
+        sumPV += price * volume;
+        sumV += volume;
 
-          lowerSeries = chart.addSeries(
-            LightweightCharts.LineSeries,
-            {
-              color: COLORS.VWAP_LOWER,
-              lineWidth: 1,
-              lineStyle: 2,
-              crosshairMarkerVisible: false,
-              priceLineVisible: false,
-              lastValueVisible: false
-            }
-          );
-        } else if (chart.addLineSeries) {
-          vwapSeries = chart.addLineSeries({
-            color: COLORS.VWAP,
-            lineWidth: 1,
-            lineStyle: 0,
-            crosshairMarkerVisible: false,
-            priceLineVisible: false,
-            lastValueVisible: false
-          });
+        sumPV2 +=
+          price * price * volume;
 
-          upperSeries = chart.addLineSeries({
-            color: COLORS.VWAP_UPPER,
-            lineWidth: 1,
-            lineStyle: 2,
-            crosshairMarkerVisible: false,
-            priceLineVisible: false,
-            lastValueVisible: false
-          });
+        if (sumV <= 0) continue;
 
-          lowerSeries = chart.addLineSeries({
-            color: COLORS.VWAP_LOWER,
-            lineWidth: 1,
-            lineStyle: 2,
-            crosshairMarkerVisible: false,
-            priceLineVisible: false,
-            lastValueVisible: false
-          });
+        const vwap =
+          sumPV / sumV;
+
+        /*
+         * Volume-weighted variance
+         *
+         * E[x²] - E[x]²
+         */
+        let variance =
+          (sumPV2 / sumV) -
+          (vwap * vwap);
+
+        if (variance < 0) {
+          variance = 0;
         }
-      } catch(e) {
-        console.error('Daily VWAP creation error', e);
-        return;
+
+        const sigma =
+          Math.sqrt(variance);
+
+        output.push({
+          time: b.time,
+          vwap: vwap,
+          upper: vwap +
+            VWAP_SIGMA * sigma,
+          lower: vwap -
+            VWAP_SIGMA * sigma
+        });
       }
-
-      if (!vwapSeries || !upperSeries || !lowerSeries) return;
-
-      try {
-        vwapSeries.setData(
-          seg.map(x => ({
-            time: x.time,
-            value: x.vwap
-          }))
-        );
-
-        upperSeries.setData(
-          seg.map(x => ({
-            time: x.time,
-            value: x.upper
-          }))
-        );
-
-        lowerSeries.setData(
-          seg.map(x => ({
-            time: x.time,
-            value: x.lower
-          }))
-        );
-      } catch(e) {
-        try { chart.removeSeries(vwapSeries); } catch(_) {}
-        try { chart.removeSeries(upperSeries); } catch(_) {}
-        try { chart.removeSeries(lowerSeries); } catch(_) {}
-        return;
-      }
-
-      arr.push({
-        series: vwapSeries,
-        title: 'Daily VWAP'
-      });
-
-      arr.push({
-        series: upperSeries,
-        title: 'VWAP +2σ'
-      });
-
-      arr.push({
-        series: lowerSeries,
-        title: 'VWAP -2σ'
-      });
     }
 
-    for (const v of values) {
-      if (segmentDay === null) {
-        segmentDay = v.dayStart;
-      }
-
-      if (segmentDay !== v.dayStart) {
-        drawSegment(segment);
-
-        segment = [];
-        segmentDay = v.dayStart;
-      }
-
-      segment.push(v);
-    }
-
-    drawSegment(segment);
+    return output;
   }
 
   // ------------------------------------------
-  // メインRender
+  // VWAP動的ライン描画
   // ------------------------------------------
-  function render(data, currentTs) {
-    if (!Array.isArray(data) || !chart) return;
 
-    const clean = data
-      .filter(validBar)
-      .sort((a,b) => a.time - b.time);
+  function makeDynamicLine(
+    points,
+    valueKey,
+    color,
+    title,
+    arr
+  ) {
+
+    if (
+      !chart ||
+      !points ||
+      points.length < 1
+    ) {
+      return;
+    }
+
+    const clean = points.filter(
+      p =>
+        Number.isFinite(p.time) &&
+        Number.isFinite(p[valueKey])
+    );
+
+    if (!clean.length) return;
+
+    let s = null;
+
+    try {
+
+      if (
+        LightweightCharts.LineSeries &&
+        chart.addSeries
+      ) {
+
+        s = chart.addSeries(
+          LightweightCharts.LineSeries,
+          {
+            color: color,
+            lineWidth: 1,
+            lineStyle:
+              LightweightCharts.LineStyle.Solid,
+            crosshairMarkerVisible: false,
+            priceLineVisible: false,
+            lastValueVisible: false,
+            visible: true
+          }
+        );
+
+      } else if (chart.addLineSeries) {
+
+        s = chart.addLineSeries({
+          color: color,
+          lineWidth: 1,
+          lineStyle: 0,
+          crosshairMarkerVisible: false,
+          priceLineVisible: false,
+          lastValueVisible: false
+        });
+
+      }
+
+    } catch (e) {
+
+      console.error(
+        'VWAP line creation error',
+        e
+      );
+
+      return;
+    }
+
+    if (!s) return;
+
+    try {
+
+      s.setData(
+        clean.map(p => ({
+          time: p.time,
+          value: p[valueKey]
+        }))
+      );
+
+    } catch (e) {
+
+      try {
+        chart.removeSeries(s);
+      } catch (_) {}
+
+      return;
+    }
+
+    arr.push({
+      series: s,
+      title
+    });
+  }
+
+  function drawDailyVWAP(
+    data,
+    arr
+  ) {
+
+    const points =
+      buildDailyVWAP(data);
+
+    if (!points.length) return;
+
+    makeDynamicLine(
+      points,
+      'vwap',
+      COLORS.VWAP,
+      'Daily VWAP',
+      arr
+    );
+
+    makeDynamicLine(
+      points,
+      'upper',
+      COLORS.VWAP_UPPER,
+      'VWAP +2σ',
+      arr
+    );
+
+    makeDynamicLine(
+      points,
+      'lower',
+      COLORS.VWAP_LOWER,
+      'VWAP -2σ',
+      arr
+    );
+  }
+
+  // ==========================================
+  // メインRender
+  // ==========================================
+
+  function render(
+    data,
+    currentTs
+  ) {
+
+    if (
+      !Array.isArray(data) ||
+      !chart
+    ) {
+      return;
+    }
+
+    const clean =
+      data
+        .filter(validBar)
+        .sort(
+          (a, b) => a.time - b.time
+        );
 
     if (!clean.length) return;
 
     resetGroups();
 
-    const days = buildPeriods(
-      clean,
-      dayStart,
-      MAX_DAYS
-    );
+    // ----------------------------------------
+    // D/W/M
+    // ----------------------------------------
 
-    const weeks = buildPeriods(
-      clean,
-      weekStart,
-      MAX_WEEKS
-    );
+    const days =
+      buildPeriods(
+        clean,
+        dayStart,
+        MAX_DAYS
+      );
 
-    const months = buildPeriods(
-      clean,
-      monthStart,
-      MAX_MONTHS
-    );
+    const weeks =
+      buildPeriods(
+        clean,
+        weekStart,
+        MAX_WEEKS
+      );
 
-    // 過去D/W/M
+    const months =
+      buildPeriods(
+        clean,
+        monthStart,
+        MAX_MONTHS
+      );
+
     drawHistory(
       days,
       groups.day,
@@ -800,7 +1065,6 @@
       'M'
     );
 
-    // 現在D/W/M
     drawCurrentPeriod(
       days[days.length - 1],
       'D',
@@ -819,8 +1083,12 @@
       current.month
     );
 
+    // ----------------------------------------
     // ATR
-    const atrs = atrSeries(days);
+    // ----------------------------------------
+
+    const atrs =
+      atrSeries(days);
 
     drawATR(
       clean,
@@ -829,12 +1097,13 @@
       current.day
     );
 
-    // Daily VWAP + 2σ
-    // cleanはリプレイ時点までのデータなので、
-    // 未来のデータをVWAP計算に使用しない。
+    // ----------------------------------------
+    // Daily VWAP
+    // ----------------------------------------
+
     drawDailyVWAP(
       clean,
-      groups.vwap
+      current.vwap
     );
 
     initialized = true;
@@ -843,8 +1112,12 @@
   // ------------------------------------------
   // 外部公開
   // ------------------------------------------
-  window.cheesecake2Reset = resetGroups;
-  window.cheesecake2Render = render;
+
+  window.cheesecake2Reset =
+    resetGroups;
+
+  window.cheesecake2Render =
+    render;
 
   window.addEventListener(
     'DOMContentLoaded',
@@ -852,4 +1125,5 @@
       initialized = false;
     }
   );
+
 })();
