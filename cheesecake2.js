@@ -1,7 +1,7 @@
 // ==========================================
 // TickForge cheesecake2
 // Pine版 cheesecake2 の主要ラインをリプレイデータへ同期
-// + Daily VWAP / Daily VWAP ±2σ
+// + Daily VWAP / VWAP ±2σ
 // ==========================================
 (function () {
   const MAX_DAYS = 40;
@@ -14,11 +14,9 @@
     L: '#ef5350',
     C: '#ffff00',
     ATR: '#ff00ff',
-
-    // Daily VWAP
     VWAP: '#ffffff',
-    VWAP_UPPER: '#ff9800',
-    VWAP_LOWER: '#ff9800'
+    VWAP_UPPER: '#ffffff',
+    VWAP_LOWER: '#ffffff'
   };
 
   let groups = { day: [], week: [], month: [], vwap: [] };
@@ -27,8 +25,10 @@
 
   function validBar(b) {
     return b && Number.isFinite(b.time) &&
-      Number.isFinite(b.open) && Number.isFinite(b.high) &&
-      Number.isFinite(b.low) && Number.isFinite(b.close);
+      Number.isFinite(b.open) &&
+      Number.isFinite(b.high) &&
+      Number.isFinite(b.low) &&
+      Number.isFinite(b.close);
   }
 
   function keyDay(ts) {
@@ -45,9 +45,12 @@
   function weekStart(ts) {
     const d = new Date(ts * 1000);
     d.setHours(0,0,0,0);
+
     const day = d.getDay();
     const diff = day === 0 ? 6 : day - 1;
+
     d.setDate(d.getDate() - diff);
+
     return Math.floor(d.getTime()/1000);
   }
 
@@ -55,6 +58,7 @@
     const d = new Date(ts * 1000);
     d.setDate(1);
     d.setHours(0,0,0,0);
+
     return Math.floor(d.getTime()/1000);
   }
 
@@ -76,6 +80,7 @@
           l: b.low,
           c: b.close
         };
+
         map.set(k, p);
       } else {
         p.end = b.time;
@@ -91,7 +96,9 @@
   }
 
   function tr(cur, prevClose) {
-    if (!Number.isFinite(prevClose)) return cur.h - cur.l;
+    if (!Number.isFinite(prevClose)) {
+      return cur.h - cur.l;
+    }
 
     return Math.max(
       cur.h - cur.l,
@@ -100,8 +107,11 @@
     );
   }
 
+  // ------------------------------------------
+  // ATR
+  // ------------------------------------------
   // ta.atr(5) に対応する Wilder RMA。
-  // 当日については、リプレイ時点までの H/L/C で更新する。
+  // 当日についてはリプレイ時点までのH/L/Cで更新。
   function atrSeries(days) {
     if (!days.length) return [];
 
@@ -110,8 +120,8 @@
     let sum = 0;
     let count = 0;
 
-    for (let i=0; i<days.length; i++) {
-      const prevC = i > 0 ? days[i-1].c : NaN;
+    for (let i = 0; i < days.length; i++) {
+      const prevC = i > 0 ? days[i - 1].c : NaN;
       const value = tr(days[i], prevC);
 
       if (!Number.isFinite(atr)) {
@@ -146,9 +156,6 @@
     arr.length = 0;
   }
 
-  // ------------------------------------------
-  // 全描画状態リセット
-  // ------------------------------------------
   function resetGroups() {
     clearSeriesArray(groups.day);
     clearSeriesArray(groups.week);
@@ -178,7 +185,7 @@
   }
 
   // ------------------------------------------
-  // 水平ライン生成
+  // 水平ライン作成
   // ------------------------------------------
   function makeLine(
     startTime,
@@ -248,16 +255,13 @@
       ]);
 
       if (LightweightCharts.createSeriesMarkers) {
-        LightweightCharts.createSeriesMarkers(
-          s,
-          [{
-            time: endTime,
-            position: 'inBar',
-            shape: 'circle',
-            color,
-            text: title
-          }]
-        );
+        LightweightCharts.createSeriesMarkers(s, [{
+          time: endTime,
+          position: 'inBar',
+          shape: 'circle',
+          color,
+          text: title
+        }]);
       }
     } catch(e) {
       try {
@@ -274,11 +278,11 @@
   }
 
   // ------------------------------------------
-  // D/W/M 過去期間
+  // 過去期間OHLC
   // ------------------------------------------
   function drawHistory(periods, arr, prefix) {
-    for (let i=1; i<periods.length; i++) {
-      const prev = periods[i-1];
+    for (let i = 1; i < periods.length; i++) {
+      const prev = periods[i - 1];
       const cur = periods[i];
 
       prev.prefix = prefix;
@@ -322,7 +326,7 @@
   }
 
   // ------------------------------------------
-  // 現在期間 D/W/M
+  // 現在期間OHLC
   // ------------------------------------------
   function drawCurrentPeriod(period, prefix, arr) {
     if (!period) return;
@@ -407,9 +411,9 @@
       true
     );
 
-    if (i >= 1 && Number.isFinite(atrs[i-1])) {
-      const p = days[i-1];
-      const a = atrs[i-1];
+    if (i >= 1 && Number.isFinite(atrs[i - 1])) {
+      const p = days[i - 1];
+      const a = atrs[i - 1];
 
       makeLine(
         p.start,
@@ -452,13 +456,13 @@
       );
     }
 
-    if (i >= 2 && Number.isFinite(atrs[i-2])) {
-      const p = days[i-2];
-      const a = atrs[i-2];
+    if (i >= 2 && Number.isFinite(atrs[i - 2])) {
+      const p = days[i - 2];
+      const a = atrs[i - 2];
 
       makeLine(
         p.start,
-        days[i-1].start - 1,
+        days[i - 1].start - 1,
         p.o + a,
         COLORS.ATR,
         'maxATR_u',
@@ -468,7 +472,7 @@
 
       makeLine(
         p.start,
-        days[i-1].start - 1,
+        days[i - 1].start - 1,
         p.o - a,
         COLORS.ATR,
         'maxATR_l',
@@ -478,7 +482,7 @@
 
       makeLine(
         p.start,
-        days[i-1].start - 1,
+        days[i - 1].start - 1,
         p.l + a,
         COLORS.ATR,
         'ATR_u',
@@ -488,7 +492,7 @@
 
       makeLine(
         p.start,
-        days[i-1].start - 1,
+        days[i - 1].start - 1,
         p.h - a,
         COLORS.ATR,
         'ATR_l',
@@ -499,41 +503,38 @@
   }
 
   // ==========================================
-  // Daily VWAP
+  // Daily VWAP + 2σ
   // ==========================================
-
-  /*
-   * Daily VWAP
-   *
-   * 各日の開始時点で累積をリセット。
-   *
-   * 価格:
-   *   Typical Price = (High + Low + Close) / 3
-   *
-   * VWAP:
-   *   Σ(Typical Price × Volume) / ΣVolume
-   *
-   * 2σ:
-   *   volume-weighted standard deviation
-   *
-   *   variance =
-   *     Σ(Volume × (Price - VWAP)^2) / ΣVolume
-   *
-   *   upper = VWAP + 2 × σ
-   *   lower = VWAP - 2 × σ
-   *
-   * リプレイ時は渡された data の時点までしか使用しない。
-   */
-
-  function calculateDailyVWAP(data) {
-    if (!data.length) return [];
+  //
+  // 価格:
+  //   HLC3 = (High + Low + Close) / 3
+  //
+  // VWAP:
+  //   Σ(HLC3 × Volume) / ΣVolume
+  //
+  // σ:
+  //   Volume加重分散から算出
+  //
+  //   variance =
+  //   Σ(Volume × (HLC3 - VWAP)^2) / ΣVolume
+  //
+  // Upper = VWAP + 2σ
+  // Lower = VWAP - 2σ
+  //
+  // Daily開始時に累積値をリセット。
+  // リプレイでは渡されたデータ時点までしか使用しない。
+  //
+  function buildDailyVWAP(data) {
+    if (!Array.isArray(data) || !data.length) {
+      return [];
+    }
 
     const result = [];
 
     let currentDay = null;
 
     let sumPV = 0;
-    let sumV = 0;
+    let sumVolume = 0;
     let sumPV2 = 0;
 
     for (const b of data) {
@@ -541,47 +542,51 @@
 
       const dStart = dayStart(b.time);
 
-      // 日付が変わったら累積をリセット
-      if (currentDay === null || dStart !== currentDay) {
+      if (currentDay === null || currentDay !== dStart) {
         currentDay = dStart;
 
         sumPV = 0;
-        sumV = 0;
+        sumVolume = 0;
         sumPV2 = 0;
       }
 
-      const volume = Number.isFinite(b.volume)
-        ? Math.max(0, b.volume)
+      const volume = Number.isFinite(b.volume) && b.volume > 0
+        ? b.volume
         : 0;
 
-      const typicalPrice =
-        (b.high + b.low + b.close) / 3;
+      const hlc3 = (
+        b.high +
+        b.low +
+        b.close
+      ) / 3;
 
-      // Volumeが0の場合でもVWAPを破綻させない。
-      // その場合は価格そのものを1単位として扱う。
-      const weight = volume > 0 ? volume : 1;
+      if (volume > 0) {
+        sumPV += hlc3 * volume;
+        sumVolume += volume;
 
-      sumPV += typicalPrice * weight;
-      sumV += weight;
-      sumPV2 += typicalPrice * typicalPrice * weight;
-
-      const vwap = sumPV / sumV;
-
-      let variance =
-        (sumPV2 / sumV) - (vwap * vwap);
-
-      if (variance < 0) {
-        variance = 0;
+        sumPV2 += hlc3 * hlc3 * volume;
       }
 
-      const sigma = Math.sqrt(variance);
+      if (sumVolume <= 0) {
+        continue;
+      }
+
+      const vwap = sumPV / sumVolume;
+
+      const variance =
+        (sumPV2 / sumVolume) -
+        (vwap * vwap);
+
+      const sigma = Math.sqrt(
+        Math.max(0, variance)
+      );
 
       result.push({
         time: b.time,
-        dayStart: dStart,
         vwap: vwap,
-        upper2: vwap + sigma * 2,
-        lower2: vwap - sigma * 2
+        upper: vwap + sigma * 2,
+        lower: vwap - sigma * 2,
+        dayStart: currentDay
       });
     }
 
@@ -589,66 +594,159 @@
   }
 
   // ------------------------------------------
-  // Daily VWAP描画
+  // VWAPを動的ラインとして描画
   // ------------------------------------------
   function drawDailyVWAP(data, arr) {
-    const values = calculateDailyVWAP(data);
+    const values = buildDailyVWAP(data);
 
     if (!values.length) return;
 
-    // 日毎にまとめる
-    const dayMap = new Map();
+    // 日ごとにラインを分ける
+    let segment = [];
+    let segmentDay = null;
 
-    for (const v of values) {
-      let group = dayMap.get(v.dayStart);
+    function drawSegment(seg) {
+      if (seg.length < 2) return;
 
-      if (!group) {
-        group = [];
-        dayMap.set(v.dayStart, group);
+      const start = seg[0].time;
+      const end = seg[seg.length - 1].time;
+
+      let vwapSeries = null;
+      let upperSeries = null;
+      let lowerSeries = null;
+
+      try {
+        if (LightweightCharts.LineSeries && chart.addSeries) {
+          vwapSeries = chart.addSeries(
+            LightweightCharts.LineSeries,
+            {
+              color: COLORS.VWAP,
+              lineWidth: 1,
+              lineStyle: 0,
+              crosshairMarkerVisible: false,
+              priceLineVisible: false,
+              lastValueVisible: false
+            }
+          );
+
+          upperSeries = chart.addSeries(
+            LightweightCharts.LineSeries,
+            {
+              color: COLORS.VWAP_UPPER,
+              lineWidth: 1,
+              lineStyle: 2,
+              crosshairMarkerVisible: false,
+              priceLineVisible: false,
+              lastValueVisible: false
+            }
+          );
+
+          lowerSeries = chart.addSeries(
+            LightweightCharts.LineSeries,
+            {
+              color: COLORS.VWAP_LOWER,
+              lineWidth: 1,
+              lineStyle: 2,
+              crosshairMarkerVisible: false,
+              priceLineVisible: false,
+              lastValueVisible: false
+            }
+          );
+        } else if (chart.addLineSeries) {
+          vwapSeries = chart.addLineSeries({
+            color: COLORS.VWAP,
+            lineWidth: 1,
+            lineStyle: 0,
+            crosshairMarkerVisible: false,
+            priceLineVisible: false,
+            lastValueVisible: false
+          });
+
+          upperSeries = chart.addLineSeries({
+            color: COLORS.VWAP_UPPER,
+            lineWidth: 1,
+            lineStyle: 2,
+            crosshairMarkerVisible: false,
+            priceLineVisible: false,
+            lastValueVisible: false
+          });
+
+          lowerSeries = chart.addLineSeries({
+            color: COLORS.VWAP_LOWER,
+            lineWidth: 1,
+            lineStyle: 2,
+            crosshairMarkerVisible: false,
+            priceLineVisible: false,
+            lastValueVisible: false
+          });
+        }
+      } catch(e) {
+        console.error('Daily VWAP creation error', e);
+        return;
       }
 
-      group.push(v);
+      if (!vwapSeries || !upperSeries || !lowerSeries) return;
+
+      try {
+        vwapSeries.setData(
+          seg.map(x => ({
+            time: x.time,
+            value: x.vwap
+          }))
+        );
+
+        upperSeries.setData(
+          seg.map(x => ({
+            time: x.time,
+            value: x.upper
+          }))
+        );
+
+        lowerSeries.setData(
+          seg.map(x => ({
+            time: x.time,
+            value: x.lower
+          }))
+        );
+      } catch(e) {
+        try { chart.removeSeries(vwapSeries); } catch(_) {}
+        try { chart.removeSeries(upperSeries); } catch(_) {}
+        try { chart.removeSeries(lowerSeries); } catch(_) {}
+        return;
+      }
+
+      arr.push({
+        series: vwapSeries,
+        title: 'Daily VWAP'
+      });
+
+      arr.push({
+        series: upperSeries,
+        title: 'VWAP +2σ'
+      });
+
+      arr.push({
+        series: lowerSeries,
+        title: 'VWAP -2σ'
+      });
     }
 
-    for (const [dStart, rows] of dayMap) {
-      if (!rows.length) continue;
+    for (const v of values) {
+      if (segmentDay === null) {
+        segmentDay = v.dayStart;
+      }
 
-      const first = rows[0];
-      const last = rows[rows.length - 1];
+      if (segmentDay !== v.dayStart) {
+        drawSegment(segment);
 
-      // Daily VWAP
-      makeLine(
-        dStart,
-        last.time,
-        last.vwap,
-        COLORS.VWAP,
-        'DVWAP',
-        arr,
-        false
-      );
+        segment = [];
+        segmentDay = v.dayStart;
+      }
 
-      // +2σ
-      makeLine(
-        dStart,
-        last.time,
-        last.upper2,
-        COLORS.VWAP_UPPER,
-        'DVWAP+2σ',
-        arr,
-        true
-      );
-
-      // -2σ
-      makeLine(
-        dStart,
-        last.time,
-        last.lower2,
-        COLORS.VWAP_LOWER,
-        'DVWAP-2σ',
-        arr,
-        true
-      );
+      segment.push(v);
     }
+
+    drawSegment(segment);
   }
 
   // ------------------------------------------
@@ -683,9 +781,7 @@
       MAX_MONTHS
     );
 
-    // ----------------------------------------
-    // D/W/M
-    // ----------------------------------------
+    // 過去D/W/M
     drawHistory(
       days,
       groups.day,
@@ -704,6 +800,7 @@
       'M'
     );
 
+    // 現在D/W/M
     drawCurrentPeriod(
       days[days.length - 1],
       'D',
@@ -722,9 +819,7 @@
       current.month
     );
 
-    // ----------------------------------------
     // ATR
-    // ----------------------------------------
     const atrs = atrSeries(days);
 
     drawATR(
@@ -734,9 +829,9 @@
       current.day
     );
 
-    // ----------------------------------------
-    // Daily VWAP
-    // ----------------------------------------
+    // Daily VWAP + 2σ
+    // cleanはリプレイ時点までのデータなので、
+    // 未来のデータをVWAP計算に使用しない。
     drawDailyVWAP(
       clean,
       groups.vwap
@@ -754,9 +849,6 @@
   window.addEventListener(
     'DOMContentLoaded',
     () => {
-      // chart_live.js の initChart 後に
-      // 実体が存在するため、初期化だけしておく。
-      // 実データはLoad時にrenderする。
       initialized = false;
     }
   );
