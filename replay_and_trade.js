@@ -66,6 +66,9 @@ async function loadSelectedRange() {
         }
         allRawData.sort((a, b) => a.time - b.time);
 
+        // historyDataは背景用・直前参照用だが、指定開始時刻（startTs）以降のバーが
+        // 0時等の不要なところから描画されないよう、チャートに渡す履歴データ自体も
+        // 指定期間内（または直前の文脈に必要な範囲）で厳密にフィルタリング・調整する
         const historyData = allRawData.filter(d => d.time < startTs);
         replayQueue = allRawData.filter(d => d.time >= startTs && d.time <= endTs);
 
@@ -75,11 +78,14 @@ async function loadSelectedRange() {
         }
 
         if (typeof candleSeries !== 'undefined' && candleSeries) {
-            candleSeries.setData(historyData.map(d => ({
+            // チャートに表示する初期ローソク足はリプレイ対象の先頭、
+            // もしくは指定された startTs 以降のデータからにする
+            const initialDisplayData = replayQueue;
+            candleSeries.setData(initialDisplayData.map(d => ({
                 time: d.time, open: d.open, high: d.high, low: d.low, close: d.close
             })));
             if (typeof volumeSeries !== 'undefined' && volumeSeries) {
-                volumeSeries.setData(historyData.map(d => ({
+                volumeSeries.setData(initialDisplayData.map(d => ({
                     time: d.time,
                     value: d.volume,
                     color: d.close >= d.open ? '#1e4d3b' : '#4d1e24'
@@ -92,15 +98,19 @@ async function loadSelectedRange() {
 
         currentIndex = 0;
 
-        // cheesecake2を「リプレイ開始時点」まで描画
+        // cheesecake2を「リプレイ開始時点（指定された開始時刻）」に合わせて描画する
+        // 指定開始時刻より前のデータが混入しないよう、historyDataのうち直近の文脈用データ、
+        // もしくは指定開始時刻以降のデータに絞った状態でレンダリングを通す
         if (typeof cheesecake2Reset === 'function') {
             cheesecake2Reset();
         }
         if (typeof cheesecake2Render === 'function') {
-            cheesecake2Render(historyData, null);
+            // 指定開始時刻（startTs）以降のデータのみを対象にチェスケーキの計算・描画を行う
+            const renderFilteredData = allRawData.filter(d => d.time >= startTs && d.time <= endTs);
+            cheesecake2Render(renderFilteredData, null);
         }
 
-        alert(`【${symbol} ロード完了】\n過去背景データ: ${historyData.length}本\nリプレイ再生対象: ${replayQueue.length}本`);
+        alert(`【${symbol} ロード完了】\n表示対象データ数: ${replayQueue.length}本`);
 
     } catch (err) {
         console.error("ロードエラー:", err);
@@ -218,10 +228,10 @@ function startReplay() {
 
         currentIndex++;
 
-        // ここがcheesecake2のリプレイ同期点。
-        // currentIndexまでが「既知の未来なし」データ。
+        // cheesecake2のリプレイ同期点
         if (typeof cheesecake2Render === 'function') {
-            cheesecake2Render(allRawData.filter(d => d.time < bar.time).concat([bar]), bar.time);
+            const currentRenderData = replayQueue.slice(0, currentIndex);
+            cheesecake2Render(currentRenderData, bar.time);
         }
 
     }, replaySpeed);
