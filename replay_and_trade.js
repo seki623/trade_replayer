@@ -1,4 +1,3 @@
-```javascript
 // ==========================================
 // TickForge: リプレイ & ペーパートレード制御 script
 // ==========================================
@@ -18,190 +17,58 @@ let tradeLines = [];
 let slPriceLine = null;
 let tpPriceLine = null;
 
+/* ==========================================
+   JST日時入力 → Unix timestamp
+   ========================================== */
 
-// ==========================================
-// 日本時間への時刻変換
-// ==========================================
-//
-// XM等のブローカーCSV:
-//   2025.07.01,01:00,...
-//
-// のようにタイムゾーン情報を持たないデータは、
-// ブローカー時間として扱う。
-//
-// 夏時間:
-//   ブローカー時刻 + 6時間 = 日本時間
-//
-// 冬時間:
-//   ブローカー時刻 + 7時間 = 日本時間
-//
-// Yahoo Finance等:
-//   2026-09-01 06:58:00-04:00
-//
-// のようにタイムゾーン情報を持つデータは、
-// new Date() がタイムゾーンを考慮してUTC時刻へ変換するため、
-// 追加補正しない。
-// ==========================================
+function parseReplayJST(value) {
 
-function getNthSunday(year, month, nth) {
-    // month: 0 = January
-    const first = new Date(year, month, 1);
-    const firstDay = first.getDay(); // 0 = Sunday
-
-    const firstSunday =
-        firstDay === 0
-            ? 1
-            : 8 - firstDay;
-
-    return firstSunday + (nth - 1) * 7;
-}
-
-function isJapanDisplaySummerTime(year, month, day) {
-    // 3月第2日曜日
-    const summerStartDay =
-        getNthSunday(year, 2, 2);
-
-    // 11月第1日曜日
-    const summerEndDay =
-        getNthSunday(year, 10, 1);
-
-    const current =
-        new Date(year, month - 1, day);
-
-    const start =
-        new Date(
-            year,
-            2,
-            summerStartDay,
-            0,
-            0,
-            0
+    if (
+        typeof parseJSTDateTime ===
+        'function'
+    ) {
+        return parseJSTDateTime(
+            value
         );
-
-    const end =
-        new Date(
-            year,
-            10,
-            summerEndDay,
-            0,
-            0,
-            0
-        );
-
-    return current >= start && current < end;
-}
-
-function getBrokerToJapanOffsetHours(
-    year,
-    month,
-    day
-) {
-    return isJapanDisplaySummerTime(
-        year,
-        month,
-        day
-    )
-        ? 6
-        : 7;
-}
-
-function parseBrokerDateTimeToUnix(
-    dateStr,
-    timeStr
-) {
-    try {
-        const normalizedDate =
-            dateStr.replace(
-                /[\.\/]/g,
-                '-'
-            );
-
-        const parts =
-            normalizedDate.split('-');
-
-        if (parts.length !== 3) {
-            return null;
-        }
-
-        const year =
-            parseInt(parts[0], 10);
-
-        const month =
-            parseInt(parts[1], 10);
-
-        const day =
-            parseInt(parts[2], 10);
-
-        if (
-            !Number.isFinite(year) ||
-            !Number.isFinite(month) ||
-            !Number.isFinite(day)
-        ) {
-            return null;
-        }
-
-        const timeParts =
-            timeStr.split(':');
-
-        const hour =
-            parseInt(timeParts[0] || '0', 10);
-
-        const minute =
-            parseInt(timeParts[1] || '0', 10);
-
-        const second =
-            parseInt(timeParts[2] || '0', 10);
-
-        if (
-            !Number.isFinite(hour) ||
-            !Number.isFinite(minute) ||
-            !Number.isFinite(second)
-        ) {
-            return null;
-        }
-
-        const offsetHours =
-            getBrokerToJapanOffsetHours(
-                year,
-                month,
-                day
-            );
-
-        // ブローカー時刻をUTCへ戻してから
-        // Unix秒へ変換する。
-        //
-        // 例:
-        // 夏時間 01:00
-        // 01:00 + 6時間 = 07:00 JST
-        //
-        // 例:
-        // 冬時間 01:00
-        // 01:00 + 7時間 = 08:00 JST
-        const utcMs =
-            Date.UTC(
-                year,
-                month - 1,
-                day,
-                hour - offsetHours,
-                minute,
-                second
-            );
-
-        return Math.floor(
-            utcMs / 1000
-        );
-
-    } catch (e) {
-        return null;
     }
+
+    if (!value) return null;
+
+    const m =
+        value.match(
+            /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2}))?$/
+        );
+
+    if (!m) return null;
+
+    const Y = Number(m[1]);
+    const M = Number(m[2]);
+    const D = Number(m[3]);
+    const h = Number(m[4]);
+    const min = Number(m[5]);
+    const s = Number(m[6] || 0);
+
+    return Math.floor(
+        (
+            Date.UTC(
+                Y,
+                M - 1,
+                D,
+                h,
+                min,
+                s
+            ) -
+            9 * 3600 * 1000
+        ) / 1000
+    );
 }
 
-
-// ==========================================
-// 指定期間ロード
-// ==========================================
+/* ==========================================
+   Load
+   ========================================== */
 
 async function loadSelectedRange() {
+
     const startVal =
         document.getElementById(
             'startTime'
@@ -212,33 +79,45 @@ async function loadSelectedRange() {
             'endTime'
         ).value;
 
-    if (!startVal || !endVal) {
+    if (
+        !startVal ||
+        !endVal
+    ) {
         alert(
             "開始日時と終了日時を正しく指定してください。"
         );
-
         return;
     }
 
-    // startTime / endTime は
-    // ブラウザ上の日本時間として扱う。
+    /*
+     * 入力欄は日本時間。
+     */
     const startTs =
-        Math.floor(
-            new Date(startVal).getTime() /
-            1000
+        parseReplayJST(
+            startVal
         );
 
     const endTs =
-        Math.floor(
-            new Date(endVal).getTime() /
-            1000
+        parseReplayJST(
+            endVal
         );
 
-    if (startTs >= endTs) {
+    if (
+        !Number.isFinite(startTs) ||
+        !Number.isFinite(endTs)
+    ) {
+        alert(
+            "開始日時と終了日時を正しく指定してください。"
+        );
+        return;
+    }
+
+    if (
+        startTs >= endTs
+    ) {
         alert(
             "終了日時は開始日時より後の時間を設定してください。"
         );
-
         return;
     }
 
@@ -253,26 +132,60 @@ async function loadSelectedRange() {
             : 'XAUUSD';
 
     pauseReplay();
+
     clearTradeVisuals();
 
     try {
-        // ------------------------------------------
-        // 開始月の1か月前から終了月まで読む。
-        // 既存の読み込み仕様を維持。
-        // ------------------------------------------
 
+        /*
+         * 月の読み込み判定は
+         * 入力値の年月を使用。
+         */
+        const startDate =
+            new Date(
+                Date.UTC(
+                    Number(
+                        startVal.slice(0, 4)
+                    ),
+                    Number(
+                        startVal.slice(5, 7)
+                    ) - 1,
+                    1
+                )
+            );
+
+        const endDate =
+            new Date(
+                Date.UTC(
+                    Number(
+                        endVal.slice(0, 4)
+                    ),
+                    Number(
+                        endVal.slice(5, 7)
+                    ) - 1,
+                    1
+                )
+            );
+
+        /*
+         * 開始月の1か月前から終了月まで読む。
+         */
         const firstMonth =
             new Date(
-                new Date(startVal).getFullYear(),
-                new Date(startVal).getMonth() - 1,
-                1
+                Date.UTC(
+                    startDate.getUTCFullYear(),
+                    startDate.getUTCMonth() - 1,
+                    1
+                )
             );
 
         const lastMonth =
             new Date(
-                new Date(endVal).getFullYear(),
-                new Date(endVal).getMonth(),
-                1
+                Date.UTC(
+                    endDate.getUTCFullYear(),
+                    endDate.getUTCMonth(),
+                    1
+                )
             );
 
         const texts = [];
@@ -280,36 +193,43 @@ async function loadSelectedRange() {
         for (
             let d = new Date(firstMonth);
             d <= lastMonth;
-            d.setMonth(
-                d.getMonth() + 1
+            d.setUTCMonth(
+                d.getUTCMonth() + 1
             )
         ) {
+
             const yyyy =
-                d.getFullYear();
+                d.getUTCFullYear();
 
             const mm =
                 String(
-                    d.getMonth() + 1
-                ).padStart(2, '0');
+                    d.getUTCMonth() + 1
+                ).padStart(
+                    2,
+                    '0'
+                );
 
             const filePath =
                 `./${symbol}/${yyyy}-${mm}.csv`;
 
             const response =
-                await fetch(filePath);
+                await fetch(
+                    filePath
+                );
 
-            if (response.ok) {
+            if (
+                response.ok
+            ) {
+
                 texts.push(
                     await response.text()
                 );
+
             } else if (
                 d.getTime() >=
-                new Date(
-                    new Date(startVal).getFullYear(),
-                    new Date(startVal).getMonth(),
-                    1
-                ).getTime()
+                startDate.getTime()
             ) {
+
                 throw new Error(
                     `【${symbol}】のCSVデータが見つかりません:\n${filePath}`
                 );
@@ -318,9 +238,14 @@ async function loadSelectedRange() {
 
         allRawData = [];
 
-        for (const text of texts) {
+        for (
+            const text of texts
+        ) {
+
             const parsed =
-                parseCSVText(text);
+                parseCSVText(
+                    text
+                );
 
             allRawData.push(
                 ...parsed
@@ -332,19 +257,14 @@ async function loadSelectedRange() {
                 a.time - b.time
         );
 
-        // ------------------------------------------
-        // 指定期間より前 = 背景履歴
-        // ------------------------------------------
-
+        /*
+         * Unix timestampはUTC基準。
+         */
         const historyData =
             allRawData.filter(
                 d =>
                     d.time < startTs
             );
-
-        // ------------------------------------------
-        // 指定期間内 = リプレイ対象
-        // ------------------------------------------
 
         replayQueue =
             allRawData.filter(
@@ -356,6 +276,7 @@ async function loadSelectedRange() {
         if (
             replayQueue.length === 0
         ) {
+
             alert(
                 `【${symbol}】指定の期間データがCSV内に見つかりませんでした。`
             );
@@ -363,58 +284,62 @@ async function loadSelectedRange() {
             return;
         }
 
-        // ------------------------------------------
-        // チャート背景
-        // ------------------------------------------
-
         if (
-            typeof candleSeries !== 'undefined' &&
+            typeof candleSeries !==
+            'undefined' &&
             candleSeries
         ) {
+
             candleSeries.setData(
-                historyData.map(d => ({
-                    time: d.time,
-                    open: d.open,
-                    high: d.high,
-                    low: d.low,
-                    close: d.close
-                }))
+                historyData.map(
+                    d => ({
+                        time: d.time,
+                        open: d.open,
+                        high: d.high,
+                        low: d.low,
+                        close: d.close
+                    })
+                )
             );
 
             if (
-                typeof volumeSeries !== 'undefined' &&
+                typeof volumeSeries !==
+                'undefined' &&
                 volumeSeries
             ) {
+
                 volumeSeries.setData(
-                    historyData.map(d => ({
-                        time: d.time,
-                        value: d.volume,
-                        color:
-                            d.close >= d.open
-                                ? '#1e4d3b'
-                                : '#4d1e24'
-                    }))
+                    historyData.map(
+                        d => ({
+                            time: d.time,
+                            value: d.volume,
+                            color:
+                                d.close >= d.open
+                                    ? '#1e4d3b'
+                                    : '#4d1e24'
+                        })
+                    )
                 );
             }
 
             if (
-                typeof chart !== 'undefined' &&
+                typeof chart !==
+                'undefined' &&
                 chart
             ) {
-                chart.timeScale()
+
+                chart
+                    .timeScale()
                     .fitContent();
             }
         }
 
         currentIndex = 0;
 
-        // ------------------------------------------
-        // Daily OHLC / VWAP
-        //
-        // 指定期間内のみ。
-        // 開始前データは混ぜない。
-        // ------------------------------------------
-
+        /*
+         * cheesecake2を
+         * リプレイ開始時点まで描画。
+         */
         if (
             typeof cheesecake2Reset ===
             'function'
@@ -426,19 +351,19 @@ async function loadSelectedRange() {
             typeof cheesecake2Render ===
             'function'
         ) {
+
             cheesecake2Render(
-                [],
+                historyData,
                 null
             );
         }
 
         alert(
-            `【${symbol} ロード完了】\n` +
-            `過去背景データ: ${historyData.length}本\n` +
-            `リプレイ再生対象: ${replayQueue.length}本`
+            `【${symbol} ロード完了】\n過去背景データ: ${historyData.length}本\nリプレイ再生対象: ${replayQueue.length}本`
         );
 
     } catch (err) {
+
         console.error(
             "ロードエラー:",
             err
@@ -450,53 +375,35 @@ async function loadSelectedRange() {
     }
 }
 
-
-// ==========================================
-// 日時文字列 → Unix
-// ==========================================
+/* ==========================================
+   旧関数
+   ========================================== */
 
 function parseDateTimeToUnix(
     dateStr,
     timeStr
 ) {
-    try {
-        let fullStr =
-            dateStr;
 
-        if (timeStr) {
-            fullStr +=
-                ' ' + timeStr;
-        }
+    if (
+        typeof parseXMDateTimeToUnix ===
+        'function'
+    ) {
 
-        fullStr =
-            fullStr.replace(
-                /[\.\/]/g,
-                '-'
-            );
-
-        const d =
-            new Date(fullStr);
-
-        if (
-            !isNaN(
-                d.getTime()
-            )
-        ) {
-            return Math.floor(
-                d.getTime() / 1000
-            );
-        }
-    } catch (e) {}
+        return parseXMDateTimeToUnix(
+            dateStr,
+            timeStr
+        );
+    }
 
     return null;
 }
 
-
-// ==========================================
-// CSV解析
-// ==========================================
+/* ==========================================
+   CSV
+   ========================================== */
 
 function parseCSVText(text) {
+
     const lines =
         text.trim().split('\n');
 
@@ -512,6 +419,7 @@ function parseCSVText(text) {
             lines[0].includes('Ticker')
         )
     ) {
+
         while (
             startLine < lines.length &&
             (
@@ -529,6 +437,7 @@ function parseCSVText(text) {
         i < lines.length;
         i++
     ) {
+
         const line =
             lines[i].trim();
 
@@ -541,9 +450,7 @@ function parseCSVText(text) {
 
         if (
             cols.length < 5
-        ) {
-            continue;
-        }
+        ) continue;
 
         let unixSec = null;
 
@@ -553,22 +460,19 @@ function parseCSVText(text) {
         let close = 0;
         let volume = 0;
 
-        // ------------------------------------------
-        // XM等:
-        //
-        // 2025.07.01,23:56,3339.08,...
-        //
-        // タイムゾーンなし。
-        // ブローカー時間として日本時間へ変換。
-        // ------------------------------------------
-
+        /*
+         * XM形式:
+         *
+         * date,time,open,high,low,close,volume
+         */
         if (
             cols[0].length <= 10 &&
             cols[1] &&
             cols[1].includes(':')
         ) {
+
             unixSec =
-                parseBrokerDateTimeToUnix(
+                parseDateTimeToUnix(
                     cols[0],
                     cols[1]
                 );
@@ -595,25 +499,20 @@ function parseCSVText(text) {
 
             volume =
                 cols[6]
-                    ? parseFloat(
-                        cols[6]
-                    )
+                    ? parseFloat(cols[6])
                     : 0;
 
         } else {
 
-            // --------------------------------------
-            // Yahoo Finance等:
-            //
-            // 2026-09-01 06:58:00-04:00,...
-            //
-            // タイムゾーン情報を持っている場合は
-            // Date() にそのまま渡す。
-            // --------------------------------------
-
+            /*
+             * 別形式:
+             *
+             * datetime,close,high,low,open,volume
+             */
             unixSec =
                 parseDateTimeToUnix(
-                    cols[0]
+                    cols[0],
+                    null
                 );
 
             close =
@@ -638,27 +537,24 @@ function parseCSVText(text) {
 
             volume =
                 cols[5]
-                    ? parseFloat(
-                        cols[5]
-                    )
+                    ? parseFloat(cols[5])
                     : 0;
         }
 
         if (
-            unixSec &&
+            Number.isFinite(unixSec) &&
             !isNaN(close) &&
-            !isNaN(open) &&
-            !isNaN(high) &&
-            !isNaN(low)
+            !isNaN(open)
         ) {
+
             result.push({
                 time: unixSec,
-                open: open,
-                high: high,
-                low: low,
-                close: close,
+                open,
+                high,
+                low,
+                close,
                 price: close,
-                volume: volume
+                volume
             });
         }
     }
@@ -666,12 +562,8 @@ function parseCSVText(text) {
     return result;
 }
 
-
-// ==========================================
-// 既存CSV解析
-// ==========================================
-
 function parseCSV(text) {
+
     allRawData =
         parseCSVText(text);
 
@@ -681,15 +573,16 @@ function parseCSV(text) {
     );
 }
 
-
-// ==========================================
-// リプレイ開始
-// ==========================================
+/* ==========================================
+   Replay
+   ========================================== */
 
 function startReplay() {
+
     if (
         replayQueue.length === 0
     ) {
+
         alert(
             "リプレイデータがセットされていません。日時を指定して 'Load' を押してください。"
         );
@@ -704,98 +597,100 @@ function startReplay() {
     }
 
     replayTimer =
-        setInterval(() => {
-
-            if (
-                currentIndex >=
-                replayQueue.length
-            ) {
-                clearInterval(
-                    replayTimer
-                );
-
-                replayTimer = null;
-
-                alert(
-                    "リプレイが終了しました。"
-                );
-
-                return;
-            }
-
-            const bar =
-                replayQueue[
-                    currentIndex
-                ];
-
-            if (
-                typeof candleSeries !== 'undefined' &&
-                candleSeries
-            ) {
-                candleSeries.update({
-                    time: bar.time,
-                    open: bar.open,
-                    high: bar.high,
-                    low: bar.low,
-                    close: bar.close
-                });
+        setInterval(
+            () => {
 
                 if (
-                    typeof volumeSeries !== 'undefined' &&
-                    volumeSeries
+                    currentIndex >=
+                    replayQueue.length
                 ) {
-                    volumeSeries.update({
-                        time: bar.time,
-                        value: bar.volume,
-                        color:
-                            bar.close >= bar.open
-                                ? '#1e4d3b'
-                                : '#4d1e24'
-                    });
+
+                    clearInterval(
+                        replayTimer
+                    );
+
+                    replayTimer = null;
+
+                    alert(
+                        "リプレイが終了しました。"
+                    );
+
+                    return;
                 }
-            }
 
-            updatePriceHeader(
-                bar.price
-            );
+                const bar =
+                    replayQueue[
+                        currentIndex
+                    ];
 
-            processPaperTrade(
-                bar
-            );
+                if (
+                    typeof candleSeries !==
+                    'undefined' &&
+                    candleSeries
+                ) {
 
-            currentIndex++;
+                    candleSeries.update({
+                        time: bar.time,
+                        open: bar.open,
+                        high: bar.high,
+                        low: bar.low,
+                        close: bar.close
+                    });
 
-            // --------------------------------------
-            // 現在までに確定した
-            // 指定期間内のM1だけ。
-            // --------------------------------------
+                    if (
+                        typeof volumeSeries !==
+                        'undefined' &&
+                        volumeSeries
+                    ) {
 
-            const visibleReplayData =
-                replayQueue.slice(
-                    0,
-                    currentIndex
+                        volumeSeries.update({
+                            time: bar.time,
+                            value: bar.volume,
+                            color:
+                                bar.close >= bar.open
+                                    ? '#1e4d3b'
+                                    : '#4d1e24'
+                        });
+                    }
+                }
+
+                updatePriceHeader(
+                    bar.price
                 );
 
-            if (
-                typeof cheesecake2Render ===
-                'function'
-            ) {
-                cheesecake2Render(
-                    visibleReplayData,
-                    bar.time
+                processPaperTrade(
+                    bar
                 );
-            }
 
-        }, replaySpeed);
+                currentIndex++;
+
+                /*
+                 * currentIndexまでが
+                 * 「既知の未来なし」データ。
+                 */
+                if (
+                    typeof cheesecake2Render ===
+                    'function'
+                ) {
+
+                    cheesecake2Render(
+                        allRawData.filter(
+                            d =>
+                                d.time < bar.time
+                        ).concat([bar]),
+                        bar.time
+                    );
+                }
+
+            },
+            replaySpeed
+        );
 }
 
-
-// ==========================================
-// リプレイ停止
-// ==========================================
-
 function pauseReplay() {
+
     if (replayTimer) {
+
         clearInterval(
             replayTimer
         );
@@ -804,12 +699,8 @@ function pauseReplay() {
     }
 }
 
-
-// ==========================================
-// 再生速度変更
-// ==========================================
-
 function changeReplaySpeed(val) {
+
     replaySpeed =
         parseInt(val);
 
@@ -818,15 +709,16 @@ function changeReplaySpeed(val) {
     }
 }
 
-
-// ==========================================
-// Paper Trade
-// ==========================================
+/* ==========================================
+   Paper Trade
+   ========================================== */
 
 function placePaperOrder(side) {
+
     if (
         paperAccount.position
     ) {
+
         alert(
             "すでにポジションを保有しています。"
         );
@@ -838,6 +730,7 @@ function placePaperOrder(side) {
         replayQueue.length === 0 ||
         currentIndex === 0
     ) {
+
         alert(
             "リプレイを開始（▶）してから注文してください。"
         );
@@ -873,17 +766,11 @@ function placePaperOrder(side) {
     );
 }
 
-
-// ==========================================
-// SL / TP
-// ==========================================
-
 function applySLTP() {
+
     if (
         !paperAccount.position
-    ) {
-        return;
-    }
+    ) return;
 
     const slVal =
         parseFloat(
@@ -912,18 +799,20 @@ function applySLTP() {
     renderSltpLines();
 }
 
-
 function renderSltpLines() {
+
     if (
-        typeof candleSeries === 'undefined' ||
+        typeof candleSeries ===
+        'undefined' ||
         !candleSeries ||
         typeof candleSeries.createPriceLine !==
-            'function'
+        'function'
     ) {
         return;
     }
 
     if (slPriceLine) {
+
         try {
             candleSeries.removePriceLine(
                 slPriceLine
@@ -934,6 +823,7 @@ function renderSltpLines() {
     }
 
     if (tpPriceLine) {
+
         try {
             candleSeries.removePriceLine(
                 tpPriceLine
@@ -945,10 +835,489 @@ function renderSltpLines() {
 
     if (
         !paperAccount.position
-    ) {
-        return;
-    }
+    ) return;
 
     const pos =
-        pa
-```
+        paperAccount.position;
+
+    if (
+        pos.sl !== null
+    ) {
+
+        slPriceLine =
+            candleSeries.createPriceLine({
+                price: pos.sl,
+                color: '#ef5350',
+                lineWidth: 1,
+                lineStyle: 2,
+                axisLabelVisible: true,
+                title: 'SL'
+            });
+    }
+
+    if (
+        pos.tp !== null
+    ) {
+
+        tpPriceLine =
+            candleSeries.createPriceLine({
+                price: pos.tp,
+                color: '#26a69a',
+                lineWidth: 1,
+                lineStyle: 2,
+                axisLabelVisible: true,
+                title: 'TP'
+            });
+    }
+}
+
+function closePaperPosition(
+    reason = 'MANUAL'
+) {
+
+    if (
+        !paperAccount.position
+    ) return;
+
+    const currentBar =
+        replayQueue[
+            currentIndex - 1
+        ];
+
+    if (!currentBar) return;
+
+    const pos =
+        paperAccount.position;
+
+    let exitPrice =
+        currentBar.price;
+
+    if (
+        reason === 'SL' &&
+        pos.sl !== null
+    ) {
+        exitPrice = pos.sl;
+    }
+
+    if (
+        reason === 'TP' &&
+        pos.tp !== null
+    ) {
+        exitPrice = pos.tp;
+    }
+
+    let pnl =
+        pos.side === 'BUY'
+            ? (
+                exitPrice -
+                pos.entryPrice
+              ) * pos.qty
+            : (
+                pos.entryPrice -
+                exitPrice
+              ) * pos.qty;
+
+    clearMarkers();
+
+    drawTradeLine(
+        pos.entryTime,
+        pos.entryPrice,
+        currentBar.time,
+        exitPrice,
+        pnl >= 0
+    );
+
+    paperAccount.balance += pnl;
+
+    paperAccount.position = null;
+
+    renderSltpLines();
+
+    updateAccountUI(
+        currentBar.price
+    );
+}
+
+/* ==========================================
+   Markers
+   ========================================== */
+
+function showActiveMarker(
+    time,
+    side
+) {
+
+    if (
+        typeof candleSeries ===
+        'undefined' ||
+        !candleSeries
+    ) return;
+
+    const marker = {
+        time: time,
+        position:
+            side === 'BUY'
+                ? 'belowBar'
+                : 'aboveBar',
+        color:
+            side === 'BUY'
+                ? '#26a69a'
+                : '#ef5350',
+        text:
+            side === 'BUY'
+                ? '▲'
+                : '▼'
+    };
+
+    try {
+
+        if (
+            typeof LightweightCharts !==
+            'undefined' &&
+            typeof LightweightCharts.createSeriesMarkers ===
+            'function'
+        ) {
+
+            LightweightCharts
+                .createSeriesMarkers(
+                    candleSeries,
+                    [marker]
+                );
+
+        } else if (
+            typeof candleSeries.setMarkers ===
+            'function'
+        ) {
+
+            candleSeries.setMarkers(
+                [marker]
+            );
+        }
+
+    } catch (e) {}
+}
+
+function clearMarkers() {
+
+    if (
+        typeof candleSeries ===
+        'undefined' ||
+        !candleSeries
+    ) return;
+
+    try {
+
+        if (
+            typeof LightweightCharts !==
+            'undefined' &&
+            typeof LightweightCharts.createSeriesMarkers ===
+            'function'
+        ) {
+
+            LightweightCharts
+                .createSeriesMarkers(
+                    candleSeries,
+                    []
+                );
+
+        } else if (
+            typeof candleSeries.setMarkers ===
+            'function'
+        ) {
+
+            candleSeries.setMarkers(
+                []
+            );
+        }
+
+    } catch(e) {}
+}
+
+/* ==========================================
+   Trade Line
+   ========================================== */
+
+function drawTradeLine(
+    startTime,
+    startPrice,
+    endTime,
+    endPrice,
+    isWin
+) {
+
+    if (
+        typeof chart ===
+        'undefined' ||
+        !chart
+    ) return;
+
+    const lineColor =
+        isWin
+            ? '#26a69a'
+            : '#ef5350';
+
+    let lineSeries = null;
+
+    try {
+
+        if (
+            typeof LightweightCharts !==
+            'undefined' &&
+            LightweightCharts.LineSeries &&
+            chart.addSeries
+        ) {
+
+            lineSeries =
+                chart.addSeries(
+                    LightweightCharts.LineSeries,
+                    {
+                        color: lineColor,
+                        lineWidth: 2,
+                        lineStyle: 2,
+                        crosshairMarkerVisible: false,
+                        priceLineVisible: false,
+                        lastValueVisible: false
+                    }
+                );
+
+        } else if (
+            chart.addLineSeries
+        ) {
+
+            lineSeries =
+                chart.addLineSeries({
+                    color: lineColor,
+                    lineWidth: 2,
+                    lineStyle: 2,
+                    crosshairMarkerVisible: false,
+                    priceLineVisible: false,
+                    lastValueVisible: false
+                });
+        }
+
+    } catch(e) {}
+
+    if (lineSeries) {
+
+        lineSeries.setData([
+            {
+                time: startTime,
+                value: startPrice
+            },
+            {
+                time: endTime,
+                value: endPrice
+            }
+        ]);
+
+        tradeLines.push(
+            lineSeries
+        );
+    }
+}
+
+/* ==========================================
+   Clear
+   ========================================== */
+
+function clearTradeVisuals() {
+
+    clearMarkers();
+
+    if (
+        typeof chart !==
+        'undefined' &&
+        chart
+    ) {
+
+        tradeLines.forEach(
+            line => {
+
+                try {
+                    chart.removeSeries(
+                        line
+                    );
+                } catch(e) {}
+            }
+        );
+    }
+
+    tradeLines = [];
+
+    renderSltpLines();
+}
+
+/* ==========================================
+   SL / TP
+   ========================================== */
+
+function processPaperTrade(
+    bar
+) {
+
+    if (
+        !paperAccount.position
+    ) return;
+
+    const pos =
+        paperAccount.position;
+
+    if (
+        pos.side === 'BUY'
+    ) {
+
+        if (
+            pos.sl !== null &&
+            bar.low <= pos.sl
+        ) {
+
+            closePaperPosition(
+                'SL'
+            );
+
+            return;
+        }
+
+        if (
+            pos.tp !== null &&
+            bar.high >= pos.tp
+        ) {
+
+            closePaperPosition(
+                'TP'
+            );
+
+            return;
+        }
+    }
+
+    if (
+        pos.side === 'SELL'
+    ) {
+
+        if (
+            pos.sl !== null &&
+            bar.high >= pos.sl
+        ) {
+
+            closePaperPosition(
+                'SL'
+            );
+
+            return;
+        }
+
+        if (
+            pos.tp !== null &&
+            bar.low <= pos.tp
+        ) {
+
+            closePaperPosition(
+                'TP'
+            );
+
+            return;
+        }
+    }
+
+    updateAccountUI(
+        bar.price
+    );
+}
+
+/* ==========================================
+   Header
+   ========================================== */
+
+function updatePriceHeader(
+    price
+) {
+
+    const $bid =
+        document.getElementById(
+            'bid-val'
+        );
+
+    const $ask =
+        document.getElementById(
+            'ask-val'
+        );
+
+    if ($bid) {
+        $bid.textContent =
+            price.toFixed(2);
+    }
+
+    if ($ask) {
+        $ask.textContent =
+            price.toFixed(2);
+    }
+}
+
+/* ==========================================
+   Account
+   ========================================== */
+
+function updateAccountUI(
+    currentPrice
+) {
+
+    let unrealizedPnl = 0;
+
+    if (
+        paperAccount.position
+    ) {
+
+        const pos =
+            paperAccount.position;
+
+        unrealizedPnl =
+            pos.side === 'BUY'
+                ? (
+                    currentPrice -
+                    pos.entryPrice
+                  ) * pos.qty
+                : (
+                    pos.entryPrice -
+                    currentPrice
+                  ) * pos.qty;
+    }
+
+    const equity =
+        paperAccount.balance +
+        unrealizedPnl;
+
+    const $equity =
+        document.getElementById(
+            'acc-equity'
+        );
+
+    const $pnl =
+        document.getElementById(
+            'acc-pnl'
+        );
+
+    if ($equity) {
+
+        $equity.textContent =
+            Math.round(
+                equity
+            ).toLocaleString();
+    }
+
+    if ($pnl) {
+
+        $pnl.textContent =
+            Math.round(
+                unrealizedPnl
+            ).toLocaleString();
+
+        $pnl.className =
+            'pnl-val ' +
+            (
+                unrealizedPnl >= 0
+                    ? 'pnl-plus'
+                    : 'pnl-minus'
+            );
+    }
+}
