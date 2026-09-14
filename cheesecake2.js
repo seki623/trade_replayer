@@ -1,7 +1,6 @@
 // ==========================================
 // TickForge cheesecake2
-// Pine版 cheesecake2 の主要ライン + Daily VWAP
-// (夏時間7時・冬時間8時基準のDaily境界自動検出版)
+// (1時間以上のギャップをトリガーとする純粋なDaily境界自動検出版)
 // ==========================================
 
 (function () {
@@ -81,49 +80,7 @@
   }
 
   // ------------------------------------------
-  // 米国夏時間判定 ＆ 開場時間（夏7時・冬8時）の判定
-  // ------------------------------------------
-
-  function isLastSunday(year, month, date) {
-    const d = new Date(year, month, date);
-    return d.getDay() === 0 && date + 7 > new Date(year, month + 1, 0).getDate();
-  }
-
-  // 米国の夏時間期間かどうか (3月第2日曜日 〜 11月第1日曜日)
-  function isUSPSummerTime(ts) {
-    const d = new Date(ts * 1000);
-    const year = d.getFullYear();
-
-    // 3月第2日曜日
-    let marchSunCount = 0;
-    let marchDay = 1;
-    while (marchSunCount < 2) {
-      if (new Date(year, 2, marchDay).getDay() === 0) {
-        marchSunCount++;
-        if (marchSunCount === 2) break;
-      }
-      marchDay++;
-    }
-
-    // 11月第1日曜日
-    let novDay = 1;
-    while (new Date(year, 10, novDay).getDay() !== 0) {
-      novDay++;
-    }
-
-    const summerStart = new Date(year, 2, marchDay, 0, 0, 0).getTime() / 1000;
-    const summerEnd = new Date(year, 10, novDay, 0, 0, 0).getTime() / 1000;
-
-    return ts >= summerStart && ts < summerEnd;
-  }
-
-  // 夏時間は7時(07:00)、冬時間は8時(08:00)をJSTの基準開始時刻とする
-  function getExpectedDailyStartHour(ts) {
-    return isUSPSummerTime(ts) ? 7 : 8;
-  }
-
-  // ------------------------------------------
-  // 1. Daily境界の共通検出 (時間差 >= 60分 ＋ 期待開始時刻へのアライメント)
+  // 1. 純粋な時間差（>= 60分）のみをトリガーとするDaily境界検出
   // ------------------------------------------
 
   function detectDailyBoundaries(data) {
@@ -138,7 +95,7 @@
       const curr = data[i];
       const diffMinutes = (curr.time - prev.time) / 60;
 
-      // 60分以上のギャップ（休場など）を検出
+      // 60分（1時間）以上のギャップ（閉場・週末・メンテナンス等）をトリガーとして分割
       if (diffMinutes >= 60) {
         boundaries.push({
           start: currentDailyStart,
@@ -146,27 +103,10 @@
           bars: currentBars
         });
 
-        // 休場後の新しいデータからDailyを開始
         currentDailyStart = curr.time;
         currentBars = [curr];
       } else {
-        // ギャップが小さくても、日を跨いだタイミングで期待開始時刻（夏7時/冬8時）に達していれば新しいDailyに分割する
-        const prevDate = new Date(prev.time * 1000);
-        const currDate = new Date(curr.time * 1000);
-        
-        const expectedHour = getExpectedDailyStartHour(curr.time);
-
-        if (prevDate.getDate() !== currDate.getDate() && currDate.getHours() >= expectedHour && prevDate.getHours() < expectedHour) {
-          boundaries.push({
-            start: currentDailyStart,
-            end: prev.time,
-            bars: currentBars
-          });
-          currentDailyStart = curr.time;
-          currentBars = [curr];
-        } else {
-          currentBars.push(curr);
-        }
+        currentBars.push(curr);
       }
     }
 
@@ -182,7 +122,7 @@
   }
 
   // ------------------------------------------
-  // 4. Daily OHLC の生成 (共通Daily境界を使用)
+  // 4. Daily OHLC の生成
   // ------------------------------------------
 
   function buildDailyOHLCPeriods(dailyBoundaries, limit) {
@@ -465,7 +405,7 @@
   }
 
   // ==========================================
-  // 5. Daily VWAP (共通Daily境界を使用)
+  // 5. Daily VWAP
   // ==========================================
 
   function buildDailyVWAP(dailyBoundaries) {
@@ -569,7 +509,7 @@
 
     makeDynamicLine(points, 'vwap', COLORS.VWAP, 'Daily VWAP', arr);
     makeDynamicLine(points, 'upper', COLORS.VWAP_UPPER, 'VWAP +2σ', arr);
-    makeLine(points, 'lower', COLORS.VWAP_LOWER, 'VWAP -2σ', arr); // 修正: 既存のmakeDynamicLineを適用
+    makeDynamicLine(points, 'lower', COLORS.VWAP_LOWER, 'VWAP -2σ', arr);
   }
 
   // ==========================================
@@ -588,7 +528,7 @@
     resetGroups();
 
     // ----------------------------------------
-    // 3. Daily境界の共通化 (OHLCとVWAPで完全共有)
+    // 3. 1時間以上のギャップのみを基準にした共通Daily境界
     // ----------------------------------------
     const dailyBoundaries = detectDailyBoundaries(clean);
 
@@ -624,7 +564,7 @@
     drawATR(clean, days, atrs, current.day);
 
     // ----------------------------------------
-    // Daily VWAP (同じ DailyBoundaries を利用)
+    // Daily VWAP
     // ----------------------------------------
     drawDailyVWAP(dailyBoundaries, current.vwap);
 
