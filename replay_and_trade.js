@@ -1,6 +1,6 @@
 // ==========================================
 // TickForge: リプレイ & ペーパートレード制御 script
-// (期間全表示・リプレイ修正版)
+// (Load時は非表示・リプレイ時に1本ずつ進む版)
 // ==========================================
 
 let allRawData = [];
@@ -75,32 +75,20 @@ async function loadSelectedRange() {
 
         currentIndex = 0;
 
-        // チャート全体（指定期間の全データ）を初期セット
+        // Load時点ではチャートをクリア（空にする）
         if (typeof candleSeries !== 'undefined' && candleSeries) {
-            candleSeries.setData(replayQueue.map(d => ({
-                time: d.time, open: d.open, high: d.high, low: d.low, close: d.close
-            })));
+            candleSeries.setData([]);
             if (typeof volumeSeries !== 'undefined' && volumeSeries) {
-                volumeSeries.setData(replayQueue.map(d => ({
-                    time: d.time,
-                    value: d.volume,
-                    color: d.close >= d.open ? '#1e4d3b' : '#4d1e24'
-                })));
-            }
-            if (typeof chart !== 'undefined' && chart) {
-                chart.timeScale().fitContent();
+                volumeSeries.setData([]);
             }
         }
 
-        // cheesecake2の計算・描画（指定期間の全データを渡す）
+        // cheesecake2もリセット
         if (typeof cheesecake2Reset === 'function') {
             cheesecake2Reset();
         }
-        if (typeof cheesecake2Render === 'function') {
-            cheesecake2Render(replayQueue, null);
-        }
 
-        alert(`【${symbol} ロード完了】\n表示対象データ数: ${replayQueue.length}本`);
+        alert(`【${symbol} ロード完了】\n再生準備OK。リプレイボタン（▶）を押すと1本ずつ描画されます。\n対象データ数: ${replayQueue.length}本`);
 
     } catch (err) {
         console.error("ロードエラー:", err);
@@ -197,6 +185,7 @@ function startReplay() {
         const bar = replayQueue[currentIndex];
 
         if (typeof candleSeries !== 'undefined' && candleSeries) {
+            // 1本ずつ update または setData で順次追加していく
             candleSeries.update({
                 time: bar.time,
                 open: bar.open,
@@ -218,7 +207,7 @@ function startReplay() {
 
         currentIndex++;
 
-        // cheesecake2のリプレイ同期点
+        // cheesecake2のリプレイ同期点（これまでの進行分を渡して再計算・描画）
         if (typeof cheesecake2Render === 'function') {
             const currentRenderData = replayQueue.slice(0, currentIndex);
             cheesecake2Render(currentRenderData, bar.time);
