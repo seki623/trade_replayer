@@ -1,7 +1,7 @@
 // ==========================================
 // TickForge cheesecake2
 // Pine版 cheesecake2 の主要ライン + Daily VWAP
-// (M1ヒストリカルデータからの時間差によるDaily境界自動検出版)
+// (夏時間7時・冬時間8時基準のDaily境界自動検出版)
 // ==========================================
 
 (function () {
@@ -81,14 +81,55 @@
   }
 
   // ------------------------------------------
-  // 1. Daily境界の共通検出 (時間差 >= 60分)
+  // 米国夏時間判定 ＆ 開場時間（夏7時・冬8時）の判定
+  // ------------------------------------------
+
+  function isLastSunday(year, month, date) {
+    const d = new Date(year, month, date);
+    return d.getDay() === 0 && date + 7 > new Date(year, month + 1, 0).getDate();
+  }
+
+  // 米国の夏時間期間かどうか (3月第2日曜日 〜 11月第1日曜日)
+  function isUSPSummerTime(ts) {
+    const d = new Date(ts * 1000);
+    const year = d.getFullYear();
+
+    // 3月第2日曜日
+    let marchSunCount = 0;
+    let marchDay = 1;
+    while (marchSunCount < 2) {
+      if (new Date(year, 2, marchDay).getDay() === 0) {
+        marchSunCount++;
+        if (marchSunCount === 2) break;
+      }
+      marchDay++;
+    }
+
+    // 11月第1日曜日
+    let novDay = 1;
+    while (new Date(year, 10, novDay).getDay() !== 0) {
+      novDay++;
+    }
+
+    const summerStart = new Date(year, 2, marchDay, 0, 0, 0).getTime() / 1000;
+    const summerEnd = new Date(year, 10, novDay, 0, 0, 0).getTime() / 1000;
+
+    return ts >= summerStart && ts < summerEnd;
+  }
+
+  // 夏時間は7時(07:00)、冬時間は8時(08:00)をJSTの基準開始時刻とする
+  function getExpectedDailyStartHour(ts) {
+    return isUSPSummerTime(ts) ? 7 : 8;
+  }
+
+  // ------------------------------------------
+  // 1. Daily境界の共通検出 (時間差 >= 60分 ＋ 期待開始時刻へのアライメント)
   // ------------------------------------------
 
   function detectDailyBoundaries(data) {
     if (!data || data.length === 0) return [];
 
     const boundaries = [];
-    // 指定期間の先頭M1から最初のDailyを開始する
     let currentDailyStart = data[0].time;
     let currentBars = [data[0]];
 
@@ -97,22 +138,38 @@
       const curr = data[i];
       const diffMinutes = (curr.time - prev.time) / 60;
 
+      // 60分以上のギャップ（休場など）を検出
       if (diffMinutes >= 60) {
-        // 前のDailyを確定してプッシュ
         boundaries.push({
           start: currentDailyStart,
           end: prev.time,
           bars: currentBars
         });
-        // 休場後に最初に存在するM1データから新しいDailyを開始
+
+        // 休場後の新しいデータからDailyを開始
         currentDailyStart = curr.time;
         currentBars = [curr];
       } else {
-        currentBars.push(curr);
+        // ギャップが小さくても、日を跨いだタイミングで期待開始時刻（夏7時/冬8時）に達していれば新しいDailyに分割する
+        const prevDate = new Date(prev.time * 1000);
+        const currDate = new Date(curr.time * 1000);
+        
+        const expectedHour = getExpectedDailyStartHour(curr.time);
+
+        if (prevDate.getDate() !== currDate.getDate() && currDate.getHours() >= expectedHour && prevDate.getHours() < expectedHour) {
+          boundaries.push({
+            start: currentDailyStart,
+            end: prev.time,
+            bars: currentBars
+          });
+          currentDailyStart = curr.time;
+          currentBars = [curr];
+        } else {
+          currentBars.push(curr);
+        }
       }
     }
 
-    // 最後のDailyを追加
     if (currentBars.length > 0) {
       boundaries.push({
         start: currentDailyStart,
@@ -422,7 +479,6 @@
       for (const b of session.bars) {
         if (!validBar(b)) continue;
 
-        // VWAP用の価格定義は変更しない
         const price = (b.high + b.low + b.close) / 3;
         const volume = Number.isFinite(b.volume) && b.volume > 0 ? b.volume : 0;
 
@@ -513,7 +569,7 @@
 
     makeDynamicLine(points, 'vwap', COLORS.VWAP, 'Daily VWAP', arr);
     makeDynamicLine(points, 'upper', COLORS.VWAP_UPPER, 'VWAP +2σ', arr);
-    makeDynamicLine(points, 'lower', COLORS.VWAP_LOWER, 'VWAP -2σ', arr);
+    makeLine(points, 'lower', COLORS.VWAP_LOWER, 'VWAP -2σ', arr); // 修正: 既存のmakeDynamicLineを適用
   }
 
   // ==========================================
