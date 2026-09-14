@@ -1,5 +1,6 @@
 // ==========================================
 // TickForge: リプレイ & ペーパートレード制御 script
+// (期間全表示・リプレイ修正版)
 // ==========================================
 
 let allRawData = [];
@@ -41,8 +42,6 @@ async function loadSelectedRange() {
     clearTradeVisuals();
 
     try {
-        // 開始月の1か月前から終了月まで読む。
-        // これにより月初でもPDO/PWO等の直前期間を取得できる。
         const firstMonth = new Date(new Date(startVal).getFullYear(), new Date(startVal).getMonth() - 1, 1);
         const lastMonth = new Date(new Date(endVal).getFullYear(), new Date(endVal).getMonth(), 1);
 
@@ -66,10 +65,7 @@ async function loadSelectedRange() {
         }
         allRawData.sort((a, b) => a.time - b.time);
 
-        // historyDataは背景用・直前参照用だが、指定開始時刻（startTs）以降のバーが
-        // 0時等の不要なところから描画されないよう、チャートに渡す履歴データ自体も
-        // 指定期間内（または直前の文脈に必要な範囲）で厳密にフィルタリング・調整する
-        const historyData = allRawData.filter(d => d.time < startTs);
+        // 指定期間内のデータをリプレイキューにセット
         replayQueue = allRawData.filter(d => d.time >= startTs && d.time <= endTs);
 
         if (replayQueue.length === 0) {
@@ -77,15 +73,15 @@ async function loadSelectedRange() {
             return;
         }
 
+        currentIndex = 0;
+
+        // チャート全体（指定期間の全データ）を初期セット
         if (typeof candleSeries !== 'undefined' && candleSeries) {
-            // チャートに表示する初期ローソク足はリプレイ対象の先頭、
-            // もしくは指定された startTs 以降のデータからにする
-            const initialDisplayData = replayQueue;
-            candleSeries.setData(initialDisplayData.map(d => ({
+            candleSeries.setData(replayQueue.map(d => ({
                 time: d.time, open: d.open, high: d.high, low: d.low, close: d.close
             })));
             if (typeof volumeSeries !== 'undefined' && volumeSeries) {
-                volumeSeries.setData(initialDisplayData.map(d => ({
+                volumeSeries.setData(replayQueue.map(d => ({
                     time: d.time,
                     value: d.volume,
                     color: d.close >= d.open ? '#1e4d3b' : '#4d1e24'
@@ -96,18 +92,12 @@ async function loadSelectedRange() {
             }
         }
 
-        currentIndex = 0;
-
-        // cheesecake2を「リプレイ開始時点（指定された開始時刻）」に合わせて描画する
-        // 指定開始時刻より前のデータが混入しないよう、historyDataのうち直近の文脈用データ、
-        // もしくは指定開始時刻以降のデータに絞った状態でレンダリングを通す
+        // cheesecake2の計算・描画（指定期間の全データを渡す）
         if (typeof cheesecake2Reset === 'function') {
             cheesecake2Reset();
         }
         if (typeof cheesecake2Render === 'function') {
-            // 指定開始時刻（startTs）以降のデータのみを対象にチェスケーキの計算・描画を行う
-            const renderFilteredData = allRawData.filter(d => d.time >= startTs && d.time <= endTs);
-            cheesecake2Render(renderFilteredData, null);
+            cheesecake2Render(replayQueue, null);
         }
 
         alert(`【${symbol} ロード完了】\n表示対象データ数: ${replayQueue.length}本`);
